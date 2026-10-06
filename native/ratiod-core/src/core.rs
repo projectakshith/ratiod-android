@@ -1,6 +1,6 @@
 use crate::{
     academia::Academia,
-    contract::{API_VERSION, Envelope, Request, Response, Service},
+    contract::{API_VERSION, Envelope, OcrStatus, Request, Response, Service},
     error::{CoreError, ErrorCode, Result},
     portal::{Portal, now_ms},
     transport::{ACADEMIA_BASE, PORTAL_LOGIN, Transport},
@@ -64,7 +64,15 @@ impl Core {
                 )
             }
             Request::LoadCaptcha { service } => to_value(match service {
-                Service::Portal => self.portal.load_captcha(),
+                Service::Portal => self.portal.load_captcha().map(|mut challenge| {
+                    if self.solver.is_some() {
+                        challenge.ocr_status = OcrStatus::Available;
+                        if let Some(pending) = self.portal.challenge.as_mut() {
+                            pending.public = challenge.clone();
+                        }
+                    }
+                    challenge
+                }),
                 Service::Academia => self.academia.challenge(),
             }?),
             Request::Login {
