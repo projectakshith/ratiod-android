@@ -56,6 +56,9 @@ pub(crate) fn marks_main(html: &str) -> Result<Vec<Subject>> {
                 .unwrap_or_else(|| "2".into()),
         });
     }
+    if result.is_empty() && !crate::parsers::recognized_empty_marks(&doc) {
+        return Err(CoreError::new(ErrorCode::ParserFailure));
+    }
     Ok(result)
 }
 pub(crate) fn marks_inner(html: &str) -> Result<Vec<Assessment>> {

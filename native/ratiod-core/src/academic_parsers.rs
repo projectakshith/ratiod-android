@@ -318,7 +318,11 @@ pub fn marks(html: &str) -> Result<Vec<Marks>> {
             total_max: valid.then_some(max),
         });
     }
-    if doc.select(&select("table")).next().is_none() {
+    if doc.select(&select("table")).next().is_none()
+        || (marks.is_empty()
+            && attendance(html).is_err()
+            && !crate::parsers::recognized_empty_marks(&doc))
+    {
         return Err(CoreError::new(ErrorCode::ParserFailure));
     }
     Ok(marks)

@@ -18,6 +18,27 @@ pub(crate) fn text(element: ElementRef<'_>) -> String {
 pub(crate) fn cells(row: ElementRef<'_>) -> Vec<String> {
     row.select(&select("td, th")).map(text).collect()
 }
+pub(crate) fn recognized_empty_marks(document: &Html) -> bool {
+    document.select(&select("table")).any(|table| {
+        let content = text(table).to_lowercase();
+        if ["no records", "no data", "no marks"]
+            .iter()
+            .any(|m| content.contains(m))
+        {
+            return true;
+        }
+        let header = table
+            .select(&select("tr"))
+            .next()
+            .map(text)
+            .unwrap_or_default()
+            .to_lowercase();
+        (header.contains("course code") || header.contains("subject code"))
+            && ["mark", "performance", "test"]
+                .iter()
+                .any(|m| header.contains(m))
+    })
+}
 
 pub fn portal_attendance(html: &str) -> Result<AttendanceData> {
     let document = Html::parse_document(html);
