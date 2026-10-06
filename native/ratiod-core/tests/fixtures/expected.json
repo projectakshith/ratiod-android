@@ -1,0 +1,204 @@
+{
+  "academiaAttendance": {
+    "attendance": [
+      {
+        "code": "21CSC101J",
+        "title": "Example Course",
+        "category": "Theory",
+        "slot": "A",
+        "conducted": 10,
+        "absent": 2,
+        "percent": 80.0,
+        "present": 8,
+        "isPortal": false
+      }
+    ],
+    "monthly": []
+  },
+  "academiaProfile": {
+    "name": "Example Student",
+    "regNo": "TEST000000",
+    "batch": "1",
+    "semester": "N/A",
+    "dept": "Example Department",
+    "section": "A",
+    "mobile": "N/A",
+    "program": "N/A"
+  },
+  "academiaMarks": [
+    {
+      "courseCode": "21CSC101J",
+      "type": "Theory",
+      "performance": "8/10",
+      "assessments": [
+        {
+          "title": "Test 1",
+          "marks": "8",
+          "total": "10"
+        },
+        {
+          "title": "Test 2",
+          "marks": "N/A",
+          "total": "20"
+        }
+      ],
+      "totalMarkGot": 8.0,
+      "totalMaxMarks": 10.0
+    }
+  ],
+  "academiaTimetable": {
+    "schedule": {
+      "Day 1": {
+        "08:00 - 08:50": {
+          "slot": "A",
+          "course": "Example Course",
+          "code": "21CSC101J",
+          "type": "Theory",
+          "raw_type": "Theory",
+          "room": "101",
+          "faculty": "Example Faculty",
+          "time": "08:00 - 08:50"
+        },
+        "08:50 - 09:40": {
+          "slot": "P1",
+          "course": "Example Course",
+          "code": "21CSC101J",
+          "type": "Practical",
+          "raw_type": "Theory",
+          "room": "101",
+          "faculty": "Example Faculty",
+          "time": "08:50 - 09:40"
+        }
+      }
+    },
+    "courses": {
+      "A": {
+        "code": "21CSC101J",
+        "name": "Example Course",
+        "credits": "3",
+        "raw_type": "Theory",
+        "faculty": "Example Faculty",
+        "room": "101",
+        "slot": "A / P1",
+        "type": "Theory"
+      },
+      "P1": {
+        "code": "21CSC101J",
+        "name": "Example Course",
+        "credits": "3",
+        "raw_type": "Theory",
+        "faculty": "Example Faculty",
+        "room": "101",
+        "slot": "A / P1",
+        "type": "Practical"
+      }
+    }
+  },
+  "portalAttendance": {
+    "attendance": [
+      {
+        "code": "21CSC102J",
+        "title": "Example Lab",
+        "category": "Theory",
+        "slot": "",
+        "conducted": 20,
+        "absent": 6,
+        "present": 14,
+        "percent": 70.0,
+        "isPortal": true
+      },
+      {
+        "code": "21CSC101J",
+        "title": "Example Course",
+        "category": "Theory",
+        "slot": "",
+        "conducted": 10,
+        "absent": 2,
+        "present": 8,
+        "percent": 80.0,
+        "isPortal": true
+      }
+    ],
+    "monthly": [
+      {
+        "month": "Oct-2026",
+        "present": 22,
+        "absent": 8
+      }
+    ]
+  },
+  "portalProfile": {
+    "name": "Example Student",
+    "regNo": "TEST000000",
+    "batch": "N/A",
+    "semester": "3",
+    "dept": "Example Department",
+    "section": "N/A",
+    "mobile": "N/A",
+    "program": "N/A"
+  },
+  "portalTimetable": {
+    "schedule": {
+      "Day 1": {
+        "08:00 - 08:50": {
+          "code": "21CSC101J",
+          "course": "Example Course",
+          "courseCode": "21CSC101J",
+          "courseTitle": "Example Course",
+          "name": "Example Course",
+          "slot": "A",
+          "type": "Theory",
+          "raw_type": "Theory",
+          "room": "TP 101",
+          "faculty": "Example Faculty",
+          "time": "08:00 - 08:50",
+          "credits": "3"
+        },
+        "08:50 - 09:40": {
+          "code": "21CSC101J",
+          "course": "Example Course Lab",
+          "courseCode": "21CSC101J",
+          "courseTitle": "Example Course Lab",
+          "name": "Example Course Lab",
+          "slot": "P1, P2",
+          "type": "Practical",
+          "raw_type": "Practical",
+          "room": "TP 102",
+          "faculty": "Example Faculty",
+          "time": "08:50 - 09:40",
+          "credits": "1"
+        },
+        "09:45 - 10:35": {
+          "code": "21CSC101J",
+          "course": "Example Course Lab",
+          "courseCode": "21CSC101J",
+          "courseTitle": "Example Course Lab",
+          "name": "Example Course Lab",
+          "slot": "P1, P2",
+          "type": "Practical",
+          "raw_type": "Practical",
+          "room": "TP 102",
+          "faculty": "Example Faculty",
+          "time": "09:45 - 10:35",
+          "credits": "1"
+        }
+      }
+    },
+    "courses": {
+      "21CSC101J": {
+        "code": "21CSC101J",
+        "name": "Example Course",
+        "title": "Example Course",
+        "credits": "3",
+        "slot": "A, P1, P2",
+        "faculty": "Example Faculty",
+        "room": "TP 101",
+        "building": "Tech Park (TP)",
+        "floor": "1",
+        "room_name": "101",
+        "type": "Theory",
+        "raw_type": "Theory"
+      }
+    }
+  }
+}

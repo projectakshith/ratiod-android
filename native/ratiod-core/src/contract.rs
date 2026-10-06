@@ -66,7 +66,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Envelope {
     pub api_version: u32,
     #[serde(flatten)]

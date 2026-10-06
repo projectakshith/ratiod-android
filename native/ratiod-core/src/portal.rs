@@ -50,6 +50,73 @@ pub struct Portal {
     pub(crate) authenticated: bool,
 }
 impl Portal {
+    fn page(&self, path: &str) -> Result<String> {
+        if !self.authenticated {
+            return Err(CoreError::new(ErrorCode::SessionExpired));
+        }
+        let page = self.http.get(&format!("{PORTAL_BASE}{path}"))?;
+        Ok(page.authenticated()?.to_owned())
+    }
+    pub fn profile(&self) -> Result<crate::models::Profile> {
+        crate::portal_parsers::profile(&self.page("/students/report/studentPersonalDetails.jsp")?)
+    }
+    pub fn timetable(&self) -> Result<crate::models::TimetableData> {
+        if !self.authenticated {
+            return Err(CoreError::new(ErrorCode::SessionExpired));
+        }
+        let form = vec![
+            ("iden".into(), "10".into()),
+            ("filter".into(), String::new()),
+            ("hdnFormDetails".into(), "1".into()),
+            ("csrfPreventionSalt".into(), String::new()),
+        ];
+        let page = self.http.post(
+            &format!("{PORTAL_BASE}/students/report/studentTimeTableDetails.jsp"),
+            &form,
+            PORTAL_LOGIN,
+        )?;
+        crate::portal_parsers::timetable(page.authenticated()?)
+    }
+    pub fn marks(&self) -> Result<Vec<crate::models::Marks>> {
+        let html = self.page("/students/report/studentInternalMarkDetails.jsp")?;
+        let mut subjects = crate::portal_parsers::marks_main(&html)?;
+        // Bounded fan-out. Component request failures become a section failure.
+        for batch in subjects.chunks_mut(4) {
+            std::thread::scope(|scope| -> Result<()> {
+                let jobs:Vec<_>=batch.iter_mut().map(|subject| scope.spawn(|| -> Result<()> {
+                    if let Some(id)=&subject.id {
+                        let fields=vec![("iden".into(),"1".into()),("hdnSubjectId".into(),id.clone()),("status".into(),subject.status.clone())];
+                        let page=self.http.post(&format!("{PORTAL_BASE}/students/report/studentInternalMarkDetailsInner.jsp"),&fields,PORTAL_LOGIN)?;
+                        subject.marks.assessments=crate::portal_parsers::marks_inner(page.authenticated()?)?;
+                    }
+                    Ok(())
+                })).collect();
+                for job in jobs {
+                    job.join()
+                        .map_err(|_| CoreError::new(ErrorCode::InternalError))??;
+                }
+                Ok(())
+            })?;
+        }
+        let mut marks: Vec<_> = subjects.into_iter().map(|s| s.marks).collect();
+        for course in self.attendance()?.attendance {
+            if !marks
+                .iter()
+                .any(|m| m.course_code.eq_ignore_ascii_case(&course.code))
+            {
+                marks.push(crate::models::Marks {
+                    course_code: course.code,
+                    title: Some(course.title),
+                    kind: "Internal".into(),
+                    performance: "N/A".into(),
+                    assessments: vec![],
+                    total_got: None,
+                    total_max: None,
+                });
+            }
+        }
+        Ok(marks)
+    }
     pub(crate) fn login(
         &mut self,
         username: String,
@@ -326,6 +393,73 @@ fn rejection(html: &str) -> Option<CoreError> {
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    struct FixedSolver {
+        uncertain: bool,
+    }
+    impl tinyocr::Solver for FixedSolver {
+        fn predict(
+            &mut self,
+            _: &[u8],
+        ) -> std::result::Result<tinyocr::Prediction, tinyocr::error::AppError> {
+            Ok(tinyocr::Prediction {
+                text: "answer-canary".into(),
+                score: if self.uncertain { 0.1 } else { 1.0 },
+            })
+        }
+    }
+    #[test]
+    fn ocr_retry_limit_and_uncertain_manual_fallback() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/loginManager/youLogin.jsp");
+            then.status(200)
+                .body("<input id='fpNonce' value='nonce'><img src='SCaptchaServlet'>");
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/SCaptchaServlet");
+            then.status(200).body("fake-image");
+        });
+        let submit = server.mock(|when, then| {
+            when.method("POST")
+                .path("/srmiststudentportal/LoginServlet");
+            then.status(200)
+                .body("<div class='alert-danger'>Invalid CAPTCHA answer-canary</div>");
+        });
+        let mut portal = Portal::new().unwrap();
+        portal.http = Transport::for_test(Service::Portal, server.base_url());
+        let mut solver: Option<Box<dyn tinyocr::Solver>> =
+            Some(Box::new(FixedSolver { uncertain: false }));
+        let error = portal
+            .login(
+                "example".into(),
+                "password-canary".into(),
+                None,
+                None,
+                &mut solver,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::CaptchaRejected);
+        assert!(error.challenge.is_some());
+        submit.assert_calls(4);
+        solver = Some(Box::new(FixedSolver { uncertain: true }));
+        let error = portal
+            .login(
+                "example".into(),
+                "password-canary".into(),
+                None,
+                None,
+                &mut solver,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::CaptchaRequired);
+        assert!(matches!(
+            error.challenge.unwrap().ocr_status,
+            OcrStatus::Uncertain
+        ));
+        submit.assert_calls(4);
+    }
     #[test]
     fn direct_challenge_login_and_attendance_keep_cookies_native() {
         let server = MockServer::start();
