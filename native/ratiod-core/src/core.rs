@@ -170,6 +170,19 @@ impl Core {
         }
     }
     fn refresh(&mut self, service: Service) -> Result<Value> {
+        if service == Service::Academia {
+            let mut timetable = self.academia.timetable();
+            if matches!(&timetable, Err(e) if matches!(e.code, ErrorCode::SessionExpired | ErrorCode::SessionConflict)) {
+                self.reauthenticate(service)?;
+                timetable = self.academia.timetable();
+            }
+            let timetable = timetable?;
+            return Ok(json!({
+                "service": service,
+                "sections": { "timetable": section(Ok(timetable)) }
+            }));
+        }
+
         let mut attendance = match service {
             Service::Portal => self.portal.attendance(),
             Service::Academia => self.academia.attendance(),

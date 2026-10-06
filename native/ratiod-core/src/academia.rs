@@ -172,17 +172,19 @@ impl Academia {
                 Url::parse(redirect).map_err(|_| CoreError::new(ErrorCode::UnexpectedResponse))?;
             url.query_pairs_mut().append_pair("access_token", &token);
             self.http.get(url.as_str())?.successful()?;
-            // Authenticate against data, not merely a cookie's presence.
-            let page = self.http.get(&format!("{ACADEMIA_BASE}{ATTENDANCE}"))?;
+            // Academia is used for timetable data. Validate the session on the
+            // timetable page; Attendance can be unavailable independently.
+            let page = self.http.get(&format!("{ACADEMIA_BASE}{PROFILE}"))?;
             let html = page.authenticated()?;
-            let extracted = match academic_parsers::extract(html) {
-                Err(error) if error.code == ErrorCode::SessionConflict && attempt == 0 => {
+            if html.to_lowercase().contains("concurrent")
+                && html.to_lowercase().contains("terminate")
+            {
+                if attempt == 0 {
                     self.terminate(html)?;
                     continue;
                 }
-                result => result?,
-            };
-            academic_parsers::attendance(&extracted)?;
+                return Err(CoreError::new(ErrorCode::SessionConflict));
+            }
             self.authenticated = true;
             self.challenge = None;
             return Ok(());

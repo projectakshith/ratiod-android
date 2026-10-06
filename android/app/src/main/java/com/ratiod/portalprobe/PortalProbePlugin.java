@@ -9,6 +9,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.PluginMethod;
+import com.ratiod.core.NativeCore;
 
 import org.json.JSONObject;
 
@@ -59,6 +60,13 @@ public class PortalProbePlugin extends Plugin {
     public void isNativeReady(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("ready", NativeCoreManager.getInstance().isReady());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void isNativeAvailable(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("available", NativeCore.isAvailable());
         call.resolve(ret);
     }
 

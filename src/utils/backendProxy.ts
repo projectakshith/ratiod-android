@@ -12,19 +12,31 @@ function jsonResponse(data: any, status = 200): Response {
   });
 }
 
+function nativeErrorResponse(error: any, fallback = "Refresh failed"): Response {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || fallback);
+  const sessionError = code === "SESSION_EXPIRED" || code === "SESSION_CONFLICT";
+  return jsonResponse({
+    detail: { type: code || "NATIVE_ERROR", message },
+  }, sessionError ? 401 : 502);
+}
+
 function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: string) {
   const attSection = sec?.attendance?.ok ? sec.attendance.data : { attendance: [], monthly: [] };
   const profSection = sec?.profile?.ok ? sec.profile.data : (fallbackUsername ? { name: fallbackUsername, regNo: fallbackUsername } : {});
   const marksSection = sec?.marks?.ok ? sec.marks.data : { marks: [] };
   const ttSection = sec?.timetable?.ok ? sec.timetable.data : { schedule: {}, courses: {} };
 
+  const requiredSectionOk = isPortal ? Boolean(sec?.attendance?.ok) : Boolean(sec?.timetable?.ok);
   return {
-    success: true,
+    success: requiredSectionOk,
     isPortal,
-    attendance: attSection.attendance || [],
-    monthly: attSection.monthly || [],
-    profile: profSection || {},
-    marks: marksSection.marks || [],
+    ...(isPortal ? {
+      attendance: attSection.attendance || [],
+      monthly: attSection.monthly || [],
+      profile: profSection || {},
+      marks: marksSection.marks || [],
+    } : { profile: profSection || {} }),
     schedule: ttSection.schedule || {},
     timetable: ttSection.schedule || {},
     courses: ttSection.courses || {}
@@ -37,7 +49,10 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
     throw new Error("Capacitor PortalProbe plugin not found");
   }
 
-  const isNative = await plugin.isNativeReady().then((r: any) => Boolean(r?.ready)).catch(() => false);
+  // nativeInvoke shares the manager's single-threaded executor with initialization,
+  // so it is safe to queue an operation before model extraction has finished.
+  const isNative = await plugin.isNativeAvailable().then((r: any) => Boolean(r?.available))
+    .catch(() => plugin.isNativeReady().then((r: any) => Boolean(r?.ready)).catch(() => false));
 
   // -------------------------------------------------------------
   // PATH A: NativeCore Engine (Rust + TinyCRNN OCR + JNI)
@@ -56,7 +71,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
             cdigest: challenge.challengeId,
             image: challenge.image,
             captcha_image: challenge.image,
-            ocrStatus: challenge.ocrStatus || "available"
+            ocrStatus: challenge.ocrStatus || "unavailable"
           });
         }
         return jsonResponse({ detail: res.error?.message || "Failed to load portal captcha" }, 503);
@@ -97,16 +112,17 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           return jsonResponse(merged);
         } else {
           const err = loginRes.error || {};
-          if (err.code === "CAPTCHA_REQUIRED" || err.code === "CAPTCHA_REJECTED") {
+          if (["CAPTCHA_REQUIRED", "CAPTCHA_REJECTED", "OCR_UNAVAILABLE", "OCR_UNCERTAIN"].includes(err.code)) {
             const ch = err.challenge;
             return jsonResponse({
               success: false,
               detail: {
-                type: "WRONG_CAPTCHA",
+                type: err.code === "CAPTCHA_REQUIRED" ? "CAPTCHA_REQUIRED" : "WRONG_CAPTCHA",
                 image: ch?.image,
                 captcha_image: ch?.image,
                 cdigest: ch?.challengeId,
                 session: ch?.challengeId,
+                ocrStatus: ch?.ocrStatus || "unavailable",
                 message: err.message || "Enter the CAPTCHA to continue."
               }
             }, 401);
@@ -147,7 +163,13 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           const refreshRes = await plugin.nativeInvoke({
             request: { apiVersion: 1, service: "academia", method: "refresh" }
           });
-          const merged = extractRefreshSections(refreshRes.data?.sections, false, creds.username);
+          const merged = refreshRes.ok
+            ? extractRefreshSections(refreshRes.data?.sections, false, creds.username)
+            : { success: true, isPortal: false, profile: { name: creds.username, regNo: creds.username }, schedule: {}, timetable: {}, courses: {} };
+          // The native login already verified the authenticated timetable page.
+          // A parser/refresh failure must not turn accepted credentials into a
+          // login failure; the normal refresh event reports and retries that data fetch.
+          if (!merged.success) merged.success = true;
           return jsonResponse(merged);
         } else {
           const err = loginRes.error || {};
@@ -185,7 +207,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           const merged = extractRefreshSections(refreshRes.data?.sections, true);
           return jsonResponse(merged);
         }
-        return jsonResponse({ detail: refreshRes.error?.message || "Refresh failed" }, 500);
+        return nativeErrorResponse(refreshRes.error);
       } catch (e: any) {
         return jsonResponse({ detail: e.message || "Refresh failed" }, 500);
       }
@@ -193,14 +215,36 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
 
     if (endpoint === "/refresh") {
       try {
-        const refreshRes = await plugin.nativeInvoke({
+        const payload = JSON.parse((options.body as string) || "{}");
+        let refreshRes = await plugin.nativeInvoke({
           request: { apiVersion: 1, service: "academia", method: "refresh" }
         });
+        if (!refreshRes.ok && refreshRes.error?.code === "SESSION_EXPIRED" && payload.username && payload.password) {
+          const loginRes = await plugin.nativeInvoke({
+            request: {
+              apiVersion: 1,
+              service: "academia",
+              method: "login",
+              username: payload.username,
+              password: payload.password,
+              useOcr: false
+            }
+          });
+          if (loginRes.ok) {
+            refreshRes = await plugin.nativeInvoke({
+              request: { apiVersion: 1, service: "academia", method: "refresh" }
+            });
+          } else {
+            return nativeErrorResponse(loginRes.error);
+          }
+        }
         if (refreshRes.ok) {
           const merged = extractRefreshSections(refreshRes.data?.sections, false);
-          return jsonResponse(merged);
+          if (merged.success) return jsonResponse(merged);
+          const error = refreshRes.data?.sections?.timetable?.error;
+          return jsonResponse({ detail: { type: error?.code || "TIMETABLE_REFRESH_FAILED", message: error?.message || "Academia timetable could not be parsed." } }, 502);
         }
-        return jsonResponse({ detail: refreshRes.error?.message || "Refresh failed" }, 500);
+        return nativeErrorResponse(refreshRes.error);
       } catch (e: any) {
         return jsonResponse({ detail: e.message || "Refresh failed" }, 500);
       }

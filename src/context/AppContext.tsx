@@ -298,6 +298,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   domainFieldName: detail.domainFieldName,
                   captchaFieldName: detail.captchaFieldName,
                   randomDelimiter: detail.randomDelimiter,
+                  ocrStatus: detail.ocrStatus,
                   message: detail.message || "Invalid captcha. Please enter the new one.",
                 };
               }
@@ -484,7 +485,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (academiaData) {
         const { success, ...rest } = academiaData;
         if (!hasPortal) Object.assign(fresh, rest);
-        else if (rest.schedule) {
+        else if (rest.schedule && Object.keys(rest.schedule).length > 0) {
           fresh.schedule = rest.schedule;
           localStorage.setItem("ratio_timetable_synced", "1");
         }

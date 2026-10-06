@@ -24,6 +24,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [error, setError] = useState<string>("");
   const [captchaInput, setCaptchaInput] = useState<string>("");
   const [captchaImage, setCaptchaImage] = useState<string | null>(null);
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
   const [cdigest, setCdigest] = useState<string | null>(null);
   const [captchaFields, setCaptchaFields] = useState<any>({});
   const [domainFieldName, setDomainFieldName] = useState<string>("dtoken_x");
@@ -50,6 +51,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         const data = await res.json();
         setCaptchaImage(data.captcha_image || data.image);
         setCdigest(data.session || data.cdigest);
+        setOcrStatus(data.ocrStatus || null);
         setCaptchaInput("");
         if (data.loginFormFields) setCaptchaFields(data.loginFormFields);
         if (data.domainFieldName) setDomainFieldName(data.domainFieldName);
@@ -69,12 +71,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) return;
-
-    if (loginMode === "portal" && !captchaInput.trim()) {
+    if (loginMode === "portal" && !captchaInput.trim() && ocrStatus !== "available") {
       setError("Please enter the security check characters.");
-      if (!captchaImage) {
-        fetchPortalCaptcha();
-      }
       return;
     }
 
@@ -110,6 +108,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         if (isCaptchaError) {
           setCaptchaImage(err.image || err.captcha_image);
           setCdigest(err.cdigest || err.session);
+          if (err.ocrStatus) setOcrStatus(err.ocrStatus);
           if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
           if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
           if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
@@ -134,6 +133,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       if (isCaptchaError) {
         setCaptchaImage(err.image || err.captcha_image);
         setCdigest(err.cdigest || err.session);
+        if (err.ocrStatus) setOcrStatus(err.ocrStatus);
         if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
         if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
         if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
@@ -200,7 +200,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         animate={isExiting ? "exit" : "visible"}
         exit="exit"
         variants={containerVariants}
-        className="w-full min-h-full flex-1 flex flex-col justify-between md:justify-center px-6 py-4 md:p-24 md:gap-12 relative bg-[#0c30ff] overflow-y-auto"
+        className="h-screen w-full flex flex-col justify-between md:justify-center p-8 md:p-24 md:gap-12 relative bg-[#0c30ff] overflow-hidden"
       >
         <motion.header variants={itemVariants} className="relative z-10">
           <h1
@@ -220,6 +220,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   setLoginMode("academia");
                   setError("");
                   setCaptchaImage(null);
+                  setOcrStatus(null);
                   setCdigest(null);
                   setCaptchaInput("");
                 }}
@@ -238,6 +239,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   setLoginMode("portal");
                   setError("");
                   setCaptchaInput("");
+                  setCaptchaImage(null);
+                  setCdigest(null);
+                  setOcrStatus(null);
                   fetchPortalCaptcha();
                 }}
                 className={`text-[11px] font-mono uppercase tracking-[0.25em] transition-all pb-1 ${
@@ -307,7 +311,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-[10px] font-mono uppercase tracking-[0.3em] text-white/60 block">
-                      Security Check
+                      {ocrStatus === "available" ? "Security Check · OCR will try first" : "Security Check · optional"}
                     </label>
                     <button
                       type="button"
@@ -326,7 +330,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                         value={captchaInput}
                         onChange={(e) => setCaptchaInput(e.target.value.toUpperCase())}
                         className="login-input w-full bg-transparent py-2 text-2xl md:text-3xl text-white outline-none placeholder:text-white/10"
-                        placeholder="captcha"
+                        placeholder="type only if OCR does not work"
                         style={{ fontFamily: "Aonic", color: 'white' }}
                         autoCapitalize="characters"
                       />
