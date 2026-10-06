@@ -9,4 +9,14 @@ license = "AGPL-3.0-or-later"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "cookies", "form", "json", "rustls"] }
+rustls = "0.23"
+webpki-root-certs = "1"
+scraper = "0.25"
+regex = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+zeroize = { version = "1", features = ["derive"] }
 
+[dev-dependencies]
+httpmock = "0.8"
