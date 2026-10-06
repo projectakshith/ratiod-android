@@ -17,6 +17,7 @@ regex = "1"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
+tinyocr = { path = "../tinyocr" }
 
 [dev-dependencies]
 httpmock = "0.8"

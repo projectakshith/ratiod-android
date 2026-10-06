@@ -33,6 +33,9 @@ android/app/src/main/assets/public/
 # Logs
 target/
 native/.cache/
+native/tinyocr/data/
+native/tinyocr/model/*.pt
+native/tinyocr/model/*.pth
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

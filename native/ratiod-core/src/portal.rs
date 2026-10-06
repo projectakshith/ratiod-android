@@ -50,6 +50,57 @@ pub struct Portal {
     pub(crate) authenticated: bool,
 }
 impl Portal {
+    pub(crate) fn login(
+        &mut self,
+        username: String,
+        password: String,
+        challenge_id: Option<&str>,
+        answer: Option<&str>,
+        solver: &mut Option<Box<dyn tinyocr::Solver>>,
+    ) -> Result<()> {
+        let initial = self.login_manual(username, password, challenge_id, answer.unwrap_or(""));
+        if answer.is_some_and(|s| !s.is_empty())
+            || !matches!(&initial, Err(e) if e.code == ErrorCode::CaptchaRequired)
+        {
+            return initial;
+        }
+        for _ in 0..4 {
+            let challenge = self
+                .challenge
+                .as_mut()
+                .ok_or_else(|| CoreError::new(ErrorCode::CaptchaRequired))?;
+            let Some(solver) = solver.as_mut() else {
+                return initial;
+            };
+            challenge.public.ocr_status = OcrStatus::Available;
+            let prediction = match solver.predict(&challenge.bytes) {
+                Ok(p) if p.score >= 0.90 && !p.text.is_empty() => p,
+                Ok(_) => {
+                    challenge.public.ocr_status = OcrStatus::Uncertain;
+                    return Err(CoreError::new(ErrorCode::CaptchaRequired)
+                        .with_challenge(challenge.public.clone()));
+                }
+                Err(_) => {
+                    challenge.public.ocr_status = OcrStatus::Unavailable;
+                    return Err(CoreError::new(ErrorCode::CaptchaRequired)
+                        .with_challenge(challenge.public.clone()));
+                }
+            };
+            let text = Zeroizing::new(prediction.text);
+            match self.submit(&text) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.code == ErrorCode::CaptchaRejected => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(CoreError::new(ErrorCode::CaptchaRejected).with_challenge(
+            self.challenge
+                .as_ref()
+                .ok_or_else(|| CoreError::new(ErrorCode::InternalError))?
+                .public
+                .clone(),
+        ))
+    }
     pub fn new() -> Result<Self> {
         Ok(Self {
             http: Transport::new(Service::Portal)?,

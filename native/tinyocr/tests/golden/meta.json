@@ -1,0 +1,46 @@
+{
+  "batch": 8,
+  "shape_input": [
+    8,
+    1,
+    45,
+    175
+  ],
+  "shape_logits": [
+    8,
+    44,
+    37
+  ],
+  "images": [
+    "9quUpw.png",
+    "2syQnv.png",
+    "AgDsWH.png",
+    "4yxckW.png",
+    "5JUK6y.png",
+    "8RrVg9.png",
+    "7AYbc6.png",
+    "69ucZ9.png"
+  ],
+  "labels": [
+    "9quUpw",
+    "2syQnv",
+    "AgDsWH",
+    "4yxckW",
+    "5JUK6y",
+    "8RrVg9",
+    "7AYbc6",
+    "69ucZ9"
+  ],
+  "greedy_texts": [
+    "9quupw",
+    "2syqnv",
+    "agdswh",
+    "4yxckw",
+    "5juk6y",
+    "8rrvg9",
+    "7aybc6",
+    "69ucz9"
+  ],
+  "sha256_input_f32le": "64e9ec56909c0e2452603dba29da0d1176d06eadab076405b42427162c02e62a",
+  "sha256_logits_f32le": "7e64b8960976d8c18bf599014a137b7b0225dfada2ae401d9f961c1cbe47d9d5"
+}
