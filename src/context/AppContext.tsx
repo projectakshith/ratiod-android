@@ -266,6 +266,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             password: creds.password,
             captcha: creds.captcha || undefined,
             cdigest: digest,
+            loginFormFields: creds.loginFormFields,
+            domainFieldName: creds.domainFieldName,
+            captchaFieldName: creds.captchaFieldName,
+            randomDelimiter: creds.randomDelimiter,
           }),
         });
 
@@ -290,6 +294,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   type: "CAPTCHA_REQUIRED",
                   image: freshImage,
                   cdigest: freshDigest,
+                  loginFormFields: detail.loginFormFields,
+                  domainFieldName: detail.domainFieldName,
+                  captchaFieldName: detail.captchaFieldName,
+                  randomDelimiter: detail.randomDelimiter,
                   message: detail.message || "Invalid captcha. Please enter the new one.",
                 };
               }
@@ -299,6 +307,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 type: "CAPTCHA_REQUIRED",
                 image: freshCapData.captcha_image || freshCapData.image,
                 cdigest: freshCapData.session,
+                loginFormFields: freshCapData.loginFormFields,
+                domainFieldName: freshCapData.domainFieldName,
+                captchaFieldName: freshCapData.captchaFieldName,
+                randomDelimiter: freshCapData.randomDelimiter,
                 message: detail.message || "Invalid captcha. Please enter the new one.",
               };
             }

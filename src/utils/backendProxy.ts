@@ -240,8 +240,11 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       const nowMs = Date.now();
       const elapsedSec = Math.max(3, Math.floor(Math.random() * 3 + 3));
       const reversedDomain = "sp.srmist.edu.in".split("").reverse().join("");
+      const domainFieldName = creds.domainFieldName || "dtoken_x";
+      const captchaFieldName = creds.captchaFieldName || "cptoken_x";
+      const randomDelimiter = creds.randomDelimiter || "0000";
       const dtoken = btoa(reversedDomain);
-      const cptoken = btoa(`${elapsedSec}00003`);
+      const cptoken = btoa(`${elapsedSec}${randomDelimiter}3`);
       const fpPayload = btoa(JSON.stringify({ fp: "", nonce: creds.cdigest || "", ts: nowMs }));
       const telemetry = btoa(JSON.stringify({
         screenWidth: window.screen.width || 1080,
@@ -255,8 +258,8 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
         username: creds.username,
         password: creds.password,
         captcha: creds.captcha || "",
-        domainFieldName: "dtoken_x",
-        captchaFieldName: "cptoken_x",
+        domainFieldName: domainFieldName,
+        captchaFieldName: captchaFieldName,
         dtoken: dtoken,
         cptoken: cptoken,
         fpPayload: fpPayload,
@@ -265,33 +268,39 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       });
 
       if (loginRes.ok) {
-        const attRes = await plugin.getAttendance();
+        const attRes = await plugin.getAttendance().catch(() => ({}));
         return jsonResponse({
           success: true,
           isPortal: true,
-          attendance: attRes.courses || [],
-          monthly: attRes.monthly || [],
+          attendance: attRes.courses || loginRes.attendance || [],
+          monthly: attRes.monthly || loginRes.monthly || [],
+          profile: loginRes.profile || attRes.profile || { name: creds.username, regNo: creds.username },
+          marks: loginRes.marks || attRes.marks || [],
+          schedule: loginRes.schedule || attRes.schedule || {},
+          timetable: loginRes.timetable || attRes.timetable || loginRes.schedule || {},
+          courses: loginRes.courses || attRes.courses || {},
           cookies: loginRes.cookies || {},
         });
       } else {
         const isWrongCaptcha = loginRes.reason === "wrong_captcha";
         if (isWrongCaptcha) {
-          let freshImage = null;
-          let freshSid = null;
+          let freshCap: any = null;
           try {
-            const cap = await plugin.loadCaptcha();
-            freshImage = cap.captchaImage;
-            freshSid = cap.nonce;
+            freshCap = await plugin.loadCaptcha();
           } catch {}
 
           return jsonResponse({
             success: false,
             detail: {
               type: "WRONG_CAPTCHA",
-              image: freshImage,
-              captcha_image: freshImage,
-              cdigest: freshSid,
-              session: freshSid,
+              image: freshCap?.captchaImage || null,
+              captcha_image: freshCap?.captchaImage || null,
+              cdigest: freshCap?.nonce || null,
+              session: freshCap?.nonce || null,
+              loginFormFields: freshCap?.loginFormFields || {},
+              domainFieldName: freshCap?.domainFieldName || "dtoken_x",
+              captchaFieldName: freshCap?.captchaFieldName || "cptoken_x",
+              randomDelimiter: freshCap?.randomDelimiter || "0000",
               message: loginRes.message || "Invalid captcha. Please enter the new one."
             }
           }, 401);
@@ -324,6 +333,10 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           isPortal: false,
           attendance: res.attendance || [],
           profile: res.profile || { name: creds.username, regNo: creds.username },
+          marks: res.marks || [],
+          schedule: res.schedule || {},
+          timetable: res.timetable || res.schedule || {},
+          courses: res.courses || {},
           cookies: res.cookies || {},
         });
       } else {
@@ -355,8 +368,14 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       const attRes = await plugin.getAttendance();
       return jsonResponse({
         success: true,
+        isPortal: true,
         attendance: attRes.courses || [],
-        monthly: attRes.monthly || []
+        monthly: attRes.monthly || [],
+        profile: attRes.profile || {},
+        marks: attRes.marks || [],
+        schedule: attRes.schedule || {},
+        timetable: attRes.timetable || attRes.schedule || {},
+        courses: attRes.courses || {}
       });
     } catch (e: any) {
       return jsonResponse({ detail: e.message || "Refresh failed" }, 500);
@@ -368,7 +387,13 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       const attRes = await plugin.getAcademiaAttendance();
       return jsonResponse({
         success: true,
-        attendance: attRes.courses || [],
+        isPortal: false,
+        attendance: attRes.courses || attRes.attendance || [],
+        profile: attRes.profile || {},
+        marks: attRes.marks || [],
+        schedule: attRes.schedule || {},
+        timetable: attRes.timetable || attRes.schedule || {},
+        courses: attRes.courses || {}
       });
     } catch (e: any) {
       return jsonResponse({ detail: e.message || "Refresh failed" }, 500);

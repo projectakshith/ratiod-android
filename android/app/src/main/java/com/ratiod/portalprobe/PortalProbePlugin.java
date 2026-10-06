@@ -277,6 +277,15 @@ public class PortalProbePlugin extends Plugin {
                 String telemetryPayload = call.getString("telemetryPayload");
                 JSObject formFields = call.getObject("loginFormFields");
 
+                if (captcha == null || captcha.trim().isEmpty()) {
+                    JSObject err = new JSObject();
+                    err.put("ok", false);
+                    err.put("reason", "wrong_captcha");
+                    err.put("message", "Security check required. Please enter the captcha.");
+                    call.resolve(err);
+                    return;
+                }
+
                 FormBody.Builder formBuilder = new FormBody.Builder();
 
                 if (formFields != null) {
@@ -314,12 +323,48 @@ public class PortalProbePlugin extends Plugin {
                     finalUrl = resp.request().url().toString().toLowerCase();
                 }
 
-                boolean isSuccess = finalUrl.contains("logout.jsp")
-                        || finalUrl.contains("attendance")
-                        || finalUrl.contains("hrdsystem");
+                String reason = "login_failed";
+                String message = "Login failed";
+                boolean explicitRejection = false;
 
-                if (!isSuccess) {
-                    // Test if attendance page is accessible with current session
+                Matcher alertMatcher = Pattern.compile("class=['\"][^'\"]*(?:alert-icon-content|alert-danger)[^'\"]*['\"][^>]*>([\\s\\S]*?)</(?:div|span|p)>").matcher(respBody);
+                if (alertMatcher.find()) {
+                    String alertText = alertMatcher.group(1).replaceAll("<[^>]*>", "").trim();
+                    if (alertText.toLowerCase().startsWith("alert")) {
+                        alertText = alertText.substring(5).trim();
+                    }
+                    message = alertText;
+                    String lower = alertText.toLowerCase();
+                    if (lower.contains("captcha")) {
+                        reason = "wrong_captcha";
+                        explicitRejection = true;
+                    } else if (lower.contains("locked")) {
+                        reason = "account_locked";
+                        explicitRejection = true;
+                    } else if (lower.contains("invalid") || lower.contains("credential") || lower.contains("unsuccessful") || lower.contains("attempts remaining")) {
+                        reason = "invalid_credentials";
+                        explicitRejection = true;
+                    }
+                }
+
+                String respLower = respBody.toLowerCase();
+                if (!explicitRejection && (finalUrl.contains("youlogin") || respLower.contains("invalid password") || respLower.contains("invalid credentials") || respLower.contains("wrong captcha"))) {
+                    if (respLower.contains("captcha")) {
+                        reason = "wrong_captcha";
+                        message = "Invalid captcha. Please enter the new one.";
+                    } else {
+                        reason = "invalid_credentials";
+                        message = "Invalid username or password.";
+                    }
+                    explicitRejection = true;
+                }
+
+                boolean isSuccess = false;
+                JSArray courses = new JSArray();
+                JSArray monthly = new JSArray();
+                JSObject profile = new JSObject();
+
+                if (!explicitRejection) {
                     Request checkReq = new Request.Builder()
                             .url(ATT_URL)
                             .header("User-Agent", USER_AGENT)
@@ -328,57 +373,354 @@ public class PortalProbePlugin extends Plugin {
                     try (Response attResp = httpClient.newCall(checkReq).execute()) {
                         String attBody = attResp.body() != null ? attResp.body().string() : "";
                         String attUrl = attResp.request().url().toString().toLowerCase();
-                        if (attResp.isSuccessful() && !attUrl.contains("youlogin") && !attBody.toLowerCase().contains("loginform")) {
-                            isSuccess = true;
+                        if (attResp.isSuccessful() && !attUrl.contains("youlogin") && !attBody.toLowerCase().contains("loginform") && !attBody.toLowerCase().contains("thegr8loginloader")) {
+                            parsePortalAttendanceAndProfile(attBody, courses, monthly, profile);
+                            if (courses.length() > 0 || (profile.has("name") && !profile.optString("name").isEmpty())) {
+                                isSuccess = true;
+                            }
                         }
                     }
                 }
+
+                if (!isSuccess) {
+                    JSObject err = new JSObject();
+                    err.put("ok", false);
+                    err.put("reason", reason);
+                    err.put("message", message);
+                    call.resolve(err);
+                    return;
+                }
+
+                JSObject tt = fetchPortalTimetableInternal();
+                JSArray marks = fetchPortalMarksInternal();
 
                 JSObject ret = new JSObject();
-                ret.put("ok", isSuccess);
+                ret.put("ok", true);
+                ret.put("isPortal", true);
+                ret.put("attendance", courses);
+                ret.put("monthly", monthly);
+                ret.put("profile", profile);
+                ret.put("schedule", tt.getJSObject("schedule"));
+                ret.put("timetable", tt.getJSObject("schedule"));
+                ret.put("courses", tt.getJSObject("courses"));
+                ret.put("marks", marks);
 
-                if (isSuccess) {
-                    JSObject cookiesObj = new JSObject();
-                    List<Cookie> cookies = inMemoryCookieJar.get("sp.srmist.edu.in");
-                    if (cookies != null) {
-                        for (Cookie c : cookies) {
-                            cookiesObj.put(c.name(), c.value());
-                        }
+                JSObject cookiesObj = new JSObject();
+                List<Cookie> cookies = inMemoryCookieJar.get("sp.srmist.edu.in");
+                if (cookies != null) {
+                    for (Cookie c : cookies) {
+                        cookiesObj.put(c.name(), c.value());
                     }
-                    ret.put("cookies", cookiesObj);
-                    call.resolve(ret);
-                } else {
-                    String reason = "login_failed";
-                    String message = "Login failed";
-
-                    // Parse alert from HTML response
-                    Matcher alertMatcher = Pattern.compile("class=['\"][^'\"]*(?:alert-icon-content|alert-danger)[^'\"]*['\"][^>]*>([\\s\\S]*?)</(?:div|span|p)>").matcher(respBody);
-                    if (alertMatcher.find()) {
-                        String alertText = alertMatcher.group(1).replaceAll("<[^>]*>", "").trim();
-                        if (alertText.toLowerCase().startsWith("alert")) {
-                            alertText = alertText.substring(5).trim();
-                        }
-                        message = alertText;
-                        String lower = alertText.toLowerCase();
-                        if (lower.contains("captcha")) {
-                            reason = "wrong_captcha";
-                        } else if (lower.contains("locked")) {
-                            reason = "account_locked";
-                        } else if (lower.contains("invalid") || lower.contains("credential") || lower.contains("unsuccessful")) {
-                            reason = "invalid_credentials";
-                        }
-                    }
-
-                    ret.put("reason", reason);
-                    ret.put("message", message);
-                    call.resolve(ret);
                 }
+                ret.put("cookies", cookiesObj);
+                call.resolve(ret);
 
             } catch (Exception e) {
                 Log.e(TAG, "Login exception: " + e.getMessage(), e);
                 call.reject("Login exception: " + e.getMessage());
             }
         }).start();
+    }
+
+    private void parsePortalAttendanceAndProfile(String html, JSArray courses, JSArray monthly, JSObject profile) {
+        if (html == null || html.isEmpty()) return;
+
+        Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
+        while (trMatcher.find()) {
+            String rowContent = trMatcher.group(1);
+            Matcher tdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(rowContent);
+            List<String> cells = new ArrayList<>();
+            while (tdMatcher.find()) {
+                String cellText = tdMatcher.group(1).replaceAll("<[^>]*>", "").trim();
+                cells.add(cellText);
+            }
+
+            if (cells.isEmpty()) continue;
+
+            if (cells.size() >= 2) {
+                String label = cells.get(0).toLowerCase();
+                String val = cells.get(1);
+                if (label.contains("student name") || label.equals("name")) {
+                    profile.put("name", val);
+                } else if (label.contains("register no") || label.contains("registration no") || label.contains("reg no")) {
+                    profile.put("regNo", val);
+                } else if (label.contains("institution") || label.contains("department")) {
+                    profile.put("dept", val);
+                } else if (label.contains("program")) {
+                    profile.put("program", val);
+                } else if (label.contains("semester")) {
+                    profile.put("semester", val);
+                } else if (label.contains("section")) {
+                    profile.put("section", val);
+                } else if (label.contains("batch")) {
+                    profile.put("batch", val);
+                } else if (label.contains("mobile")) {
+                    profile.put("mobile", val);
+                }
+            }
+
+            String firstCell = cells.get(0);
+            if (firstCell.matches("^[A-Z0-9]{6,12}$") && cells.size() >= 6) {
+                try {
+                    JSObject course = new JSObject();
+                    course.put("code", firstCell);
+                    course.put("title", cells.get(1));
+                    course.put("category", "Theory");
+                    course.put("slot", "");
+                    int conducted = Integer.parseInt(cells.get(2));
+                    int present = Integer.parseInt(cells.get(3));
+                    int absent = Integer.parseInt(cells.get(4));
+                    double percent = Double.parseDouble(cells.get(5));
+                    course.put("conducted", conducted);
+                    course.put("present", present);
+                    course.put("absent", absent);
+                    course.put("percent", percent);
+                    course.put("isPortal", true);
+                    courses.put(course);
+                } catch (NumberFormatException ignored) {}
+            } else if (firstCell.matches("^[A-Za-z]{3}-\\d{4}$") && cells.size() >= 3) {
+                try {
+                    JSObject m = new JSObject();
+                    m.put("month", firstCell);
+                    m.put("present", Integer.parseInt(cells.get(1)));
+                    m.put("absent", Integer.parseInt(cells.get(2)));
+                    monthly.put(m);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+
+        if (!profile.has("name") || profile.optString("name").isEmpty()) {
+            try {
+                Request pReq = new Request.Builder()
+                        .url("https://sp.srmist.edu.in/srmiststudentportal/students/report/studentPersonalDetails.jsp")
+                        .header("User-Agent", USER_AGENT)
+                        .header("Referer", LOGIN_URL)
+                        .build();
+                try (Response pResp = httpClient.newCall(pReq).execute()) {
+                    if (pResp.isSuccessful() && pResp.body() != null) {
+                        String pHtml = pResp.body().string();
+                        Matcher pTrMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(pHtml);
+                        while (pTrMatcher.find()) {
+                            Matcher pTdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(pTrMatcher.group(1));
+                            List<String> pCells = new ArrayList<>();
+                            while (pTdMatcher.find()) {
+                                pCells.add(pTdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
+                            }
+                            if (pCells.size() >= 2) {
+                                String label = pCells.get(0).toLowerCase();
+                                String val = pCells.get(1);
+                                if (label.contains("student name") || label.equals("name")) {
+                                    profile.put("name", val);
+                                } else if (label.contains("register no") || label.contains("registration no") || label.contains("reg no")) {
+                                    profile.put("regNo", val);
+                                } else if (label.contains("institution") || label.contains("department")) {
+                                    profile.put("dept", val);
+                                } else if (label.contains("program")) {
+                                    profile.put("program", val);
+                                } else if (label.contains("semester")) {
+                                    profile.put("semester", val);
+                                } else if (label.contains("section")) {
+                                    profile.put("section", val);
+                                } else if (label.contains("batch")) {
+                                    profile.put("batch", val);
+                                } else if (label.contains("mobile")) {
+                                    profile.put("mobile", val);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private JSObject fetchPortalTimetableInternal() {
+        JSObject result = new JSObject();
+        JSObject schedule = new JSObject();
+        JSObject coursesMap = new JSObject();
+        result.put("schedule", schedule);
+        result.put("courses", coursesMap);
+
+        try {
+            FormBody form = new FormBody.Builder()
+                    .add("iden", "10")
+                    .add("filter", "")
+                    .add("hdnFormDetails", "1")
+                    .add("csrfPreventionSalt", "")
+                    .build();
+
+            Request req = new Request.Builder()
+                    .url("https://sp.srmist.edu.in/srmiststudentportal/students/report/studentTimeTableDetails.jsp")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", LOGIN_URL)
+                    .post(form)
+                    .build();
+
+            String html;
+            try (Response resp = httpClient.newCall(req).execute()) {
+                if (!resp.isSuccessful()) return result;
+                html = resp.body() != null ? resp.body().string() : "";
+            }
+
+            Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
+            List<List<String>> allRows = new ArrayList<>();
+            while (trMatcher.find()) {
+                Matcher tdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(trMatcher.group(1));
+                List<String> cells = new ArrayList<>();
+                while (tdMatcher.find()) {
+                    cells.add(tdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
+                }
+                if (!cells.isEmpty()) {
+                    allRows.add(cells);
+                }
+            }
+
+            for (List<String> c : allRows) {
+                if (c.size() >= 5 && c.get(0).matches("^[A-Z0-9]{6,12}$")) {
+                    String code = c.get(0);
+                    String name = c.get(1);
+                    String credits = c.get(2);
+                    String slot = c.get(3);
+                    String faculty = c.size() > 4 ? c.get(4) : "TBA";
+                    String room = c.size() > 7 ? c.get(7) : "TBA";
+                    String kind = (name.toLowerCase().contains("lab") || name.toLowerCase().contains("practical") || slot.toUpperCase().startsWith("P")) ? "Practical" : "Theory";
+
+                    JSObject course = new JSObject();
+                    course.put("code", code);
+                    course.put("name", name);
+                    course.put("title", name);
+                    course.put("credits", credits);
+                    course.put("slot", slot);
+                    course.put("faculty", faculty.isEmpty() ? "TBA" : faculty);
+                    course.put("room", room.isEmpty() ? "TBA" : room);
+                    course.put("kind", kind);
+                    coursesMap.put(code, course);
+                }
+            }
+
+            List<String> times = new ArrayList<>();
+            Pattern timePattern = Pattern.compile("(\\d{1,2}:\\d{2})\\s*-\\s*(\\d{1,2}:\\d{2})");
+            for (List<String> row : allRows) {
+                boolean hasTime = false;
+                List<String> rowTimes = new ArrayList<>();
+                for (String cell : row) {
+                    Matcher tm = timePattern.matcher(cell);
+                    if (tm.find()) {
+                        hasTime = true;
+                        rowTimes.add(tm.group(1) + " - " + tm.group(2));
+                    }
+                }
+                if (hasTime && rowTimes.size() >= 3) {
+                    times = rowTimes;
+                    break;
+                }
+            }
+
+            Pattern dayPattern = Pattern.compile("(?i)Day\\s*(\\d+)");
+            for (List<String> row : allRows) {
+                if (row.isEmpty()) continue;
+                Matcher dm = dayPattern.matcher(row.get(0));
+                if (dm.find()) {
+                    String dayKey = "Day " + dm.group(1);
+                    JSObject daySlots = schedule.has(dayKey) ? schedule.getJSObject(dayKey) : new JSObject();
+                    schedule.put(dayKey, daySlots);
+
+                    for (int i = 1; i < row.size() && (i - 1) < times.size(); i++) {
+                        String cellCode = row.get(i).trim();
+                        if (cellCode.isEmpty() || cellCode.equals("-") || cellCode.equals("--")) continue;
+                        String time = times.get(i - 1);
+
+                        JSObject slotObj = new JSObject();
+                        slotObj.put("code", cellCode);
+                        slotObj.put("time", time);
+
+                        if (coursesMap.has(cellCode)) {
+                            JSObject matched = coursesMap.getJSObject(cellCode);
+                            slotObj.put("title", matched.optString("title", cellCode));
+                            slotObj.put("name", matched.optString("name", cellCode));
+                            slotObj.put("room", matched.optString("room", "TBA"));
+                            slotObj.put("faculty", matched.optString("faculty", "TBA"));
+                            slotObj.put("kind", matched.optString("kind", "Theory"));
+                            slotObj.put("slot", matched.optString("slot", ""));
+                        } else {
+                            slotObj.put("title", cellCode);
+                            slotObj.put("name", cellCode);
+                            slotObj.put("room", "TBA");
+                            slotObj.put("faculty", "TBA");
+                            slotObj.put("kind", "Theory");
+                            slotObj.put("slot", "");
+                        }
+
+                        daySlots.put(time, slotObj);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching portal timetable: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private JSArray fetchPortalMarksInternal() {
+        JSArray marks = new JSArray();
+        try {
+            Request req = new Request.Builder()
+                    .url("https://sp.srmist.edu.in/srmiststudentportal/students/report/studentInternalMarkDetails.jsp")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", LOGIN_URL)
+                    .build();
+
+            String html;
+            try (Response resp = httpClient.newCall(req).execute()) {
+                if (!resp.isSuccessful()) return marks;
+                html = resp.body() != null ? resp.body().string() : "";
+            }
+
+            Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
+            while (trMatcher.find()) {
+                Matcher tdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(trMatcher.group(1));
+                List<String> cells = new ArrayList<>();
+                while (tdMatcher.find()) {
+                    cells.add(tdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
+                }
+                if (cells.size() >= 3 && cells.get(0).matches("^[A-Z0-9]{6,12}$")) {
+                    JSObject m = new JSObject();
+                    String code = cells.get(0);
+                    String title = cells.get(1);
+                    String perf = cells.get(2);
+                    m.put("courseCode", code);
+                    m.put("course_code", code);
+                    m.put("code", code);
+                    m.put("course", code);
+                    m.put("title", title);
+                    m.put("courseTitle", title);
+                    m.put("type", "Internal");
+                    m.put("kind", "Internal");
+                    m.put("raw_type", "Internal");
+                    m.put("performance", perf.isEmpty() ? "N/A" : perf);
+                    m.put("assessments", new JSArray());
+
+                    if (perf.contains("/")) {
+                        String[] parts = perf.split("/");
+                        try {
+                            double got = Double.parseDouble(parts[0].trim());
+                            double max = Double.parseDouble(parts[1].trim());
+                            m.put("totalMarkGot", got);
+                            m.put("totalMaxMarks", max);
+                            m.put("totalGot", got);
+                            m.put("totalMax", max);
+                            m.put("total_got", got);
+                            m.put("total_max", max);
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    marks.put(m);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching portal marks: " + e.getMessage());
+        }
+        return marks;
     }
 
     @PluginMethod
@@ -413,51 +755,23 @@ public class PortalProbePlugin extends Plugin {
                     return;
                 }
 
-                // Parse attendance HTML table
                 JSArray courses = new JSArray();
                 JSArray monthly = new JSArray();
+                JSObject profile = new JSObject();
+                parsePortalAttendanceAndProfile(html, courses, monthly, profile);
 
-                // Simple regex parser for <tr>...</tr> and <td>...</td>
-                Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
-                while (trMatcher.find()) {
-                    String rowContent = trMatcher.group(1);
-                    Matcher tdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(rowContent);
-                    List<String> cells = new ArrayList<>();
-                    while (tdMatcher.find()) {
-                        String cellText = tdMatcher.group(1).replaceAll("<[^>]*>", "").trim();
-                        cells.add(cellText);
-                    }
-
-                    if (cells.isEmpty()) continue;
-
-                    String firstCell = cells.get(0);
-                    // Match course code pattern e.g. 21CSE101, 18CSC302J, etc.
-                    if (firstCell.matches("^[A-Z0-9]{6,12}$") && cells.size() >= 6) {
-                        try {
-                            JSObject course = new JSObject();
-                            course.put("code", firstCell);
-                            course.put("title", cells.get(1));
-                            course.put("conducted", Integer.parseInt(cells.get(2)));
-                            course.put("present", Integer.parseInt(cells.get(3)));
-                            course.put("absent", Integer.parseInt(cells.get(4)));
-                            course.put("percent", Double.parseDouble(cells.get(5)));
-                            courses.put(course);
-                        } catch (NumberFormatException ignored) {}
-                    } else if (firstCell.matches("^[A-Za-z]{3}-\\d{4}$") && cells.size() >= 3) {
-                        try {
-                            JSObject month = new JSObject();
-                            month.put("month", firstCell);
-                            month.put("present", Integer.parseInt(cells.get(1)));
-                            month.put("absent", Integer.parseInt(cells.get(2)));
-                            monthly.put(month);
-                        } catch (NumberFormatException ignored) {}
-                    }
-                }
+                JSObject tt = fetchPortalTimetableInternal();
+                JSArray marks = fetchPortalMarksInternal();
 
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
                 ret.put("courses", courses);
+                ret.put("attendance", courses);
                 ret.put("monthly", monthly);
+                ret.put("profile", profile);
+                ret.put("schedule", tt.getJSObject("schedule"));
+                ret.put("timetable", tt.getJSObject("schedule"));
+                ret.put("marks", marks);
                 call.resolve(ret);
 
             } catch (Exception e) {
@@ -492,6 +806,371 @@ public class PortalProbePlugin extends Plugin {
         ret.put("authenticated", cookies != null && !cookies.isEmpty());
         ret.put("cookies", names);
         call.resolve(ret);
+    }
+
+    private String unescapePageSanitizer(String html) {
+        if (html == null) return "";
+        Matcher sanitizeMatcher = Pattern.compile("pageSanitizer\\.sanitize\\('((?:\\\\.|[^'\\\\])*)'\\)", Pattern.DOTALL).matcher(html);
+        if (sanitizeMatcher.find()) {
+            return unescapeString(sanitizeMatcher.group(1));
+        }
+        Matcher zmlMatcher = Pattern.compile("zmlvalue=\"([^\"]+)\"").matcher(html);
+        if (zmlMatcher.find()) {
+            return zmlMatcher.group(1).replace("\\-", "-").replace("\\/", "/");
+        }
+        return html;
+    }
+
+    private String unescapeString(String raw) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        int len = raw.length();
+        while (i < len) {
+            char c = raw.charAt(i);
+            if (c != '\\' || i + 1 >= len) {
+                sb.append(c);
+                i++;
+                continue;
+            }
+            i++;
+            char next = raw.charAt(i);
+            if (next == 'n') {
+                sb.append('\n');
+                i++;
+            } else if (next == 'r') {
+                sb.append('\r');
+                i++;
+            } else if (next == 't') {
+                sb.append('\t');
+                i++;
+            } else if (next == 'u' && i + 4 < len) {
+                String hex = raw.substring(i + 1, i + 5);
+                try {
+                    sb.append((char) Integer.parseInt(hex, 16));
+                    i += 5;
+                } catch (NumberFormatException e) {
+                    sb.append(next);
+                    i++;
+                }
+            } else {
+                sb.append(next);
+                i++;
+            }
+        }
+        return sb.toString();
+    }
+
+    private JSObject fetchAcademiaFullDataInternal() {
+        JSObject data = new JSObject();
+        JSArray attendanceList = new JSArray();
+        JSArray monthlyList = new JSArray();
+        JSArray marksList = new JSArray();
+        JSObject profileObj = new JSObject();
+        JSObject scheduleObj = new JSObject();
+        JSObject coursesMap = new JSObject();
+
+        data.put("attendance", attendanceList);
+        data.put("monthly", monthlyList);
+        data.put("marks", marksList);
+        data.put("profile", profileObj);
+        data.put("schedule", scheduleObj);
+        data.put("courses", coursesMap);
+
+        try {
+            Request attReq = new Request.Builder()
+                    .url("https://academia.srmist.edu.in/srm_university/academia-academic-services/page/My_Attendance")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build();
+
+            try (Response resp = httpClient.newCall(attReq).execute()) {
+                if (resp.isSuccessful() && resp.body() != null) {
+                    String raw = resp.body().string();
+                    String html = unescapePageSanitizer(raw);
+
+                    Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
+                    while (trMatcher.find()) {
+                        String rowContent = trMatcher.group(1);
+                        Matcher tdMatcher = Pattern.compile("<td[^>]*>([\\s\\S]*?)</td>", Pattern.CASE_INSENSITIVE).matcher(rowContent);
+                        List<String> cells = new ArrayList<>();
+                        List<String> rawCells = new ArrayList<>();
+                        while (tdMatcher.find()) {
+                            String inner = tdMatcher.group(1);
+                            rawCells.add(inner);
+                            cells.add(inner.replaceAll("<[^>]*>", "").trim());
+                        }
+
+                        if (cells.size() >= 9) {
+                            String code = cells.get(0).replaceAll("Regular", "").trim();
+                            if (code.matches("^[A-Z0-9]{8,12}.*")) {
+                                try {
+                                    JSObject c = new JSObject();
+                                    c.put("code", code);
+                                    c.put("title", cells.get(1));
+                                    c.put("category", cells.get(2));
+                                    c.put("slot", cells.get(4));
+                                    int conducted = Integer.parseInt(cells.get(6));
+                                    int absent = Integer.parseInt(cells.get(7));
+                                    c.put("conducted", conducted);
+                                    c.put("absent", absent);
+                                    c.put("present", conducted - absent);
+                                    c.put("percent", Double.parseDouble(cells.get(8)));
+                                    c.put("isPortal", false);
+                                    attendanceList.put(c);
+                                } catch (Exception ignored) {}
+                            }
+                        }
+
+                        if (cells.size() >= 3 && rawCells.size() >= 3) {
+                            String code = cells.get(0).trim();
+                            if (code.matches("^[A-Z0-9]{8,12}$")) {
+                                JSObject m = new JSObject();
+                                String kind = cells.get(1);
+                                m.put("courseCode", code);
+                                m.put("course_code", code);
+                                m.put("code", code);
+                                m.put("course", code);
+                                m.put("title", code);
+                                m.put("courseTitle", code);
+                                m.put("type", kind);
+                                m.put("kind", kind);
+                                m.put("raw_type", kind);
+                                String nestedHtml = rawCells.get(2);
+
+                                JSArray assessments = new JSArray();
+                                double totalGot = 0;
+                                double totalMax = 0;
+                                boolean hasValid = false;
+
+                                Matcher subTdMatcher = Pattern.compile("<td[^>]*>([\\s\\S]*?)</td>", Pattern.CASE_INSENSITIVE).matcher(nestedHtml);
+                                while (subTdMatcher.find()) {
+                                    String subText = subTdMatcher.group(1).replaceAll("<[^>]*>", "").trim();
+                                    String[] parts = subText.split("\\n");
+                                    List<String> cleanParts = new ArrayList<>();
+                                    for (String p : parts) {
+                                        String pt = p.trim();
+                                        if (!pt.isEmpty()) cleanParts.add(pt);
+                                    }
+                                    if (cleanParts.size() >= 2) {
+                                        String header = cleanParts.get(0);
+                                        String gotStr = cleanParts.get(1);
+                                        String title = header;
+                                        String maxStr = "0";
+                                        if (header.contains("/")) {
+                                            String[] hp = header.split("/");
+                                            title = hp[0].trim();
+                                            maxStr = hp[1].trim();
+                                        }
+
+                                        JSObject ass = new JSObject();
+                                        ass.put("title", title);
+                                        ass.put("marks", gotStr);
+                                        ass.put("total", maxStr);
+                                        try {
+                                            ass.put("got", Double.parseDouble(gotStr));
+                                            ass.put("max", Double.parseDouble(maxStr));
+                                        } catch (Exception ignored) {}
+                                        assessments.put(ass);
+
+                                        try {
+                                            totalGot += Double.parseDouble(gotStr);
+                                            totalMax += Double.parseDouble(maxStr);
+                                            hasValid = true;
+                                        } catch (NumberFormatException ignored) {}
+                                    }
+                                }
+
+                                m.put("assessments", assessments);
+                                m.put("performance", hasValid ? (totalGot + "/" + totalMax) : "N/A");
+                                if (hasValid) {
+                                    m.put("totalMarkGot", totalGot);
+                                    m.put("totalMaxMarks", totalMax);
+                                    m.put("totalGot", totalGot);
+                                    m.put("totalMax", totalMax);
+                                    m.put("total_got", totalGot);
+                                    m.put("total_max", totalMax);
+                                }
+                                marksList.put(m);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching academia attendance page: " + e.getMessage());
+        }
+
+        try {
+            Request ttReq = new Request.Builder()
+                    .url("https://academia.srmist.edu.in/srm_university/academia-academic-services/page/My_Time_Table_2023_24")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build();
+
+            try (Response resp = httpClient.newCall(ttReq).execute()) {
+                if (resp.isSuccessful() && resp.body() != null) {
+                    String raw = resp.body().string();
+                    String html = unescapePageSanitizer(raw);
+
+                    Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
+                    while (trMatcher.find()) {
+                        Matcher tdMatcher = Pattern.compile("<td[^>]*>([\\s\\S]*?)</td>", Pattern.CASE_INSENSITIVE).matcher(trMatcher.group(1));
+                        List<String> cells = new ArrayList<>();
+                        while (tdMatcher.find()) {
+                            cells.add(tdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
+                        }
+
+                        for (int i = 0; i + 1 < cells.size(); i += 2) {
+                            String label = cells.get(i).toLowerCase();
+                            String val = cells.get(i + 1);
+                            if (label.contains("registration number") || label.contains("register no")) {
+                                profileObj.put("regNo", val);
+                            } else if (label.contains("student name") || label.equals("name")) {
+                                profileObj.put("name", val);
+                            } else if (label.contains("department") || label.contains("institution")) {
+                                profileObj.put("dept", val);
+                            } else if (label.contains("program")) {
+                                profileObj.put("program", val);
+                            } else if (label.contains("semester")) {
+                                profileObj.put("semester", val);
+                            } else if (label.contains("batch")) {
+                                profileObj.put("batch", val.contains("/") ? val.substring(val.lastIndexOf('/') + 1).trim() : val);
+                            }
+                        }
+
+                        if (cells.size() >= 10 && cells.get(1).matches("^[A-Z0-9]{6,12}$")) {
+                            String code = cells.get(1);
+                            String name = cells.get(2);
+                            String credits = cells.get(3);
+                            String rawType = cells.get(6);
+                            String faculty = cells.get(7);
+                            String slot = cells.get(8);
+                            String room = cells.size() > 9 ? cells.get(9) : "TBA";
+                            boolean isLab = slot.toUpperCase().startsWith("P") || slot.toUpperCase().startsWith("L") || faculty.toLowerCase().contains("lab");
+
+                            JSObject c = new JSObject();
+                            c.put("code", code);
+                            c.put("name", name);
+                            c.put("title", name);
+                            c.put("credits", credits);
+                            c.put("slot", slot);
+                            c.put("faculty", faculty);
+                            c.put("room", room);
+                            c.put("kind", isLab ? "Practical" : "Theory");
+                            c.put("type", isLab ? "Practical" : "Theory");
+                            c.put("raw_type", rawType);
+                            coursesMap.put(slot, c);
+                            coursesMap.put(code, c);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching academia profile timetable: " + e.getMessage());
+        }
+
+        // 3. Fetch Unified Time Table for batch grid
+        try {
+            String batch = profileObj.optString("batch", "1").trim();
+            String batchSuffix = batch.equals("1") ? "Batch_1" : "batch_2";
+            String[] years = {"2025", "2024", "2023_24"};
+            String gridHtml = null;
+
+            for (String yr : years) {
+                String gridUrl = yr.equals("2023_24")
+                        ? "https://academia.srmist.edu.in/srm_university/academia-academic-services/page/Unified_Time_Table_" + yr
+                        : "https://academia.srmist.edu.in/srm_university/academia-academic-services/page/Unified_Time_Table_" + yr + "_" + batchSuffix;
+                Request gridReq = new Request.Builder()
+                        .url(gridUrl)
+                        .header("User-Agent", "Mozilla/5.0")
+                        .build();
+
+                try (Response resp = httpClient.newCall(gridReq).execute()) {
+                    if (resp.isSuccessful() && resp.body() != null) {
+                        String unescaped = unescapePageSanitizer(resp.body().string());
+                        if (unescaped.toLowerCase().contains("day 1") && unescaped.contains(":")) {
+                            gridHtml = unescaped;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (gridHtml != null) {
+                Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(gridHtml);
+                List<List<String>> rows = new ArrayList<>();
+                while (trMatcher.find()) {
+                    Matcher tdMatcher = Pattern.compile("<(?:td|th)[^>]*>([\\s\\S]*?)</(?:td|th)>", Pattern.CASE_INSENSITIVE).matcher(trMatcher.group(1));
+                    List<String> cells = new ArrayList<>();
+                    while (tdMatcher.find()) {
+                        cells.add(tdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
+                    }
+                    if (!cells.isEmpty()) rows.add(cells);
+                }
+
+                List<String> timeHeaders = new ArrayList<>();
+                if (!rows.isEmpty()) {
+                    for (String c : rows.get(0)) {
+                        if (c.contains(":") && !c.toLowerCase().contains("day")) {
+                            timeHeaders.add(c);
+                        }
+                    }
+                }
+
+                Pattern dayPattern = Pattern.compile("(?i)Day\\s*(\\d+)");
+                for (List<String> row : rows) {
+                    if (row.isEmpty()) continue;
+                    Matcher dm = dayPattern.matcher(row.get(0));
+                    if (dm.find()) {
+                        String dayName = "Day " + dm.group(1);
+                        JSObject daySlots = scheduleObj.has(dayName) ? scheduleObj.getJSObject(dayName) : new JSObject();
+                        scheduleObj.put(dayName, daySlots);
+
+                        for (int i = 1; i < row.size() && (i - 1) < timeHeaders.size(); i++) {
+                            String rawSlot = row.get(i).trim();
+                            if (rawSlot.isEmpty() || rawSlot.equals("-") || rawSlot.equals("--")) continue;
+                            String slotCode = rawSlot.split("/")[0].trim();
+                            if (slotCode.isEmpty()) continue;
+                            String time = timeHeaders.get(i - 1);
+
+                            JSObject slotObj = new JSObject();
+                            slotObj.put("slot", slotCode);
+                            slotObj.put("time", time);
+
+                            if (coursesMap.has(slotCode)) {
+                                JSObject matched = coursesMap.getJSObject(slotCode);
+                                slotObj.put("course", matched.optString("name", slotCode));
+                                slotObj.put("courseCode", matched.optString("code", slotCode));
+                                slotObj.put("courseTitle", matched.optString("name", slotCode));
+                                slotObj.put("name", matched.optString("name", slotCode));
+                                slotObj.put("code", matched.optString("code", slotCode));
+                                slotObj.put("type", matched.optString("kind", "Theory"));
+                                slotObj.put("kind", matched.optString("kind", "Theory"));
+                                slotObj.put("raw_type", matched.optString("kind", "Theory"));
+                                slotObj.put("room", matched.optString("room", "TBA"));
+                                slotObj.put("faculty", matched.optString("faculty", "TBA"));
+                                slotObj.put("credits", matched.optString("credits", ""));
+                            } else {
+                                slotObj.put("course", slotCode);
+                                slotObj.put("courseCode", slotCode);
+                                slotObj.put("courseTitle", slotCode);
+                                slotObj.put("name", slotCode);
+                                slotObj.put("code", slotCode);
+                                slotObj.put("type", "Theory");
+                                slotObj.put("kind", "Theory");
+                                slotObj.put("raw_type", "Theory");
+                                slotObj.put("room", "TBA");
+                                slotObj.put("faculty", "TBA");
+                                slotObj.put("credits", "");
+                            }
+                            daySlots.put(time, slotObj);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching academia unified timetable grid: " + e.getMessage());
+        }
+
+        return data;
     }
 
     @PluginMethod
@@ -569,16 +1248,23 @@ public class PortalProbePlugin extends Plugin {
                             // JSESSIONID is now stored in cookie jar
                         }
 
-                        JSArray courses = fetchAcademiaAttendanceInternal();
+                        JSObject fullData = fetchAcademiaFullDataInternal();
 
                         JSObject ret = new JSObject();
                         ret.put("ok", true);
                         ret.put("isPortal", false);
-                        ret.put("attendance", courses);
+                        ret.put("attendance", fullData.opt("attendance"));
+                        ret.put("courses", fullData.opt("attendance"));
+                        ret.put("monthly", fullData.opt("monthly"));
+                        ret.put("marks", fullData.opt("marks"));
+                        ret.put("schedule", fullData.opt("schedule"));
+                        ret.put("timetable", fullData.opt("schedule"));
 
-                        JSObject profile = new JSObject();
-                        profile.put("name", username);
-                        profile.put("regNo", username);
+                        JSObject profile = fullData.getJSObject("profile");
+                        if (!profile.has("name") || profile.optString("name").isEmpty()) {
+                            profile.put("name", username);
+                            profile.put("regNo", username);
+                        }
                         ret.put("profile", profile);
 
                         JSObject cookiesObj = new JSObject();
@@ -607,60 +1293,25 @@ public class PortalProbePlugin extends Plugin {
         }).start();
     }
 
-    private JSArray fetchAcademiaAttendanceInternal() {
-        JSArray courses = new JSArray();
-        try {
-            Request req = new Request.Builder()
-                    .url("https://academia.srmist.edu.in/srm_university/academia-academic-services/page/My_Attendance")
-                    .header("User-Agent", "Mozilla/5.0")
-                    .build();
-            try (Response resp = httpClient.newCall(req).execute()) {
-                if (!resp.isSuccessful()) return courses;
-                String html = resp.body() != null ? resp.body().string() : "";
-
-                Matcher trMatcher = Pattern.compile("<tr[^>]*>([\\s\\S]*?)</tr>", Pattern.CASE_INSENSITIVE).matcher(html);
-                while (trMatcher.find()) {
-                    String row = trMatcher.group(1);
-                    Matcher tdMatcher = Pattern.compile("<td[^>]*>([\\s\\S]*?)</td>", Pattern.CASE_INSENSITIVE).matcher(row);
-                    List<String> cells = new ArrayList<>();
-                    while (tdMatcher.find()) {
-                        cells.add(tdMatcher.group(1).replaceAll("<[^>]*>", "").trim());
-                    }
-                    if (cells.size() >= 9) {
-                        String code = cells.get(0).replaceAll("Regular", "").trim();
-                        if (code.matches("^[A-Z0-9]{8,12}.*")) {
-                            try {
-                                JSObject c = new JSObject();
-                                c.put("code", code);
-                                c.put("title", cells.get(1));
-                                c.put("category", cells.get(2));
-                                c.put("slot", cells.get(4));
-                                int conducted = Integer.parseInt(cells.get(6));
-                                int absent = Integer.parseInt(cells.get(7));
-                                c.put("conducted", conducted);
-                                c.put("absent", absent);
-                                c.put("present", conducted - absent);
-                                c.put("percent", Double.parseDouble(cells.get(8)));
-                                courses.put(c);
-                            } catch (Exception ignored) {}
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Academia attendance parsing error: " + e.getMessage());
-        }
-        return courses;
-    }
-
     @PluginMethod
     public void getAcademiaAttendance(PluginCall call) {
         new Thread(() -> {
-            JSArray courses = fetchAcademiaAttendanceInternal();
-            JSObject ret = new JSObject();
-            ret.put("ok", true);
-            ret.put("courses", courses);
-            call.resolve(ret);
+            try {
+                JSObject fullData = fetchAcademiaFullDataInternal();
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("attendance", fullData.opt("attendance"));
+                ret.put("courses", fullData.opt("attendance"));
+                ret.put("monthly", fullData.opt("monthly"));
+                ret.put("marks", fullData.opt("marks"));
+                ret.put("profile", fullData.getJSObject("profile"));
+                ret.put("schedule", fullData.getJSObject("schedule"));
+                ret.put("timetable", fullData.getJSObject("schedule"));
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "Error fetching academia attendance: " + e.getMessage(), e);
+                call.reject("Error fetching academia attendance: " + e.getMessage());
+            }
         }).start();
     }
 }
