@@ -8,8 +8,12 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "ratiod_core"
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [dependencies]
 ratiod-core = { path = "../ratiod-core" }
 serde_json.workspace = true
-
+jni = "0.21.1"
+zeroize = "1"
+log = { version = "0.4", features = ["max_level_off", "release_max_level_off"] }
+tracing = { version = "0.1", features = ["max_level_off", "release_max_level_off"] }

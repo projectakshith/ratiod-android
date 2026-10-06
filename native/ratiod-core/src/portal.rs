@@ -255,14 +255,13 @@ impl Portal {
         if username.is_empty() || password.is_empty() {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
-        if let Some(id) = challenge_id {
-            if self
+        if let Some(id) = challenge_id
+            && self
                 .challenge
                 .as_ref()
                 .is_none_or(|c| c.public.challenge_id != id)
-            {
-                return Err(CoreError::new(ErrorCode::InvalidRequest));
-            }
+        {
+            return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
         if self
             .credentials

@@ -179,7 +179,7 @@ pub fn courses(html: &str) -> Result<CourseMap> {
         })
         .unwrap_or(0);
     let mut map = CourseMap::new();
-    for c in c[start..].chunks_exact(11) {
+    for c in c[start..].as_chunks::<11>().0 {
         if c[1].len() < 3 {
             continue;
         }
@@ -289,12 +289,13 @@ pub fn marks(html: &str) -> Result<Vec<Marks>> {
                     total: clean(total),
                     date: None,
                 });
-                if let (Ok(a), Ok(b)) = (parts[1].parse::<f64>(), total.trim().parse::<f64>()) {
-                    if a.is_finite() && b.is_finite() {
-                        got += a;
-                        max += b;
-                        valid = true;
-                    }
+                if let (Ok(a), Ok(b)) = (parts[1].parse::<f64>(), total.trim().parse::<f64>())
+                    && a.is_finite()
+                    && b.is_finite()
+                {
+                    got += a;
+                    max += b;
+                    valid = true;
                 }
             }
         }

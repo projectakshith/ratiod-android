@@ -329,13 +329,12 @@ pub fn timetable(html: &str) -> Result<TimetableData> {
             let chosen = variants
                 .get(code)
                 .and_then(|choices| {
-                    if let Some(actual) = actual {
-                        if let Some(exact) = choices
+                    if let Some(actual) = actual
+                        && let Some(exact) = choices
                             .iter()
                             .find(|c| tokens(&c.slot).contains(&normalize(actual)))
-                        {
-                            return Some(exact);
-                        }
+                    {
+                        return Some(exact);
                     }
                     if slot_grid.is_some() {
                         choices

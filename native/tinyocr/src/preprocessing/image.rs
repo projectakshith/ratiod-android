@@ -41,7 +41,7 @@ pub fn preprocess_with_dims(bytes: &[u8]) -> Result<(Vec<f32>, u32, u32), AppErr
 
     // Same float op order as ToTensor() + Normalize(0.5, 0.5).
     let mut out = Vec::with_capacity(INPUT_LEN);
-    for px in pixels.chunks_exact(3) {
+    for px in pixels.as_chunks::<3>().0 {
         let x = f32::from(pil_luma(px[0], px[1], px[2])) / 255.0;
         out.push((x - 0.5) / 0.5);
     }

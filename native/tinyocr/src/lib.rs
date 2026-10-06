@@ -86,7 +86,7 @@ fn minimum_emitted_score(logits: &[f32]) -> f32 {
     let mut score = 1.0_f32;
     let mut previous = 0;
     let mut emitted = false;
-    for row in logits.chunks_exact(NUM_CLASSES) {
+    for row in logits.as_chunks::<NUM_CLASSES>().0 {
         let best = row.iter().enumerate().fold(
             0,
             |best, (i, value)| if value > &row[best] { i } else { best },
@@ -131,14 +131,18 @@ mod tests {
         let input = std::fs::read(root.join("tests/golden/input.bin")).unwrap();
         let reference = std::fs::read(root.join("tests/golden/logits.bin")).unwrap();
         let floats = |b: &[u8]| {
-            b.chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            b.as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| f32::from_le_bytes(*c))
                 .collect::<Vec<_>>()
         };
         let input = floats(&input);
         let reference = floats(&reference);
         for (i, tensor) in input
-            .chunks_exact(preprocessing::image::INPUT_LEN)
+            .as_chunks::<{ preprocessing::image::INPUT_LEN }>()
+            .0
+            .iter()
             .enumerate()
         {
             let logits = engine.infer(tensor).unwrap();

@@ -23,94 +23,6 @@ pub struct Academia {
     challenge: Option<(Challenge, Zeroizing<String>)>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use httpmock::MockServer;
-    #[test]
-    fn academia_interactive_captcha_exchange_and_attendance() {
-        let server = MockServer::start();
-        let mut first = server.mock(|when, then| {
-            when.method("POST").path("/accounts/signin.ac");
-            then.status(200)
-                .body(r#"{"status":"fail","code":"HIP_REQUIRED","cdigest":"digest-canary"}"#);
-        });
-        server.mock(|when, then| {
-            when.method("GET")
-                .path("/accounts/p/40-10002227248/webclient/v1/captcha/digest-canary");
-            then.status(200).body("fake-image");
-        });
-        let mut client = Academia::new().unwrap();
-        client.http = Transport::for_test(Service::Academia, server.base_url());
-        let error = client
-            .login("example".into(), "password-canary".into(), None, None)
-            .unwrap_err();
-        assert_eq!(error.code, ErrorCode::CaptchaRequired);
-        let challenge = error.challenge.unwrap();
-        assert!(
-            !serde_json::to_string(&challenge)
-                .unwrap()
-                .contains("digest-canary")
-        );
-        first.delete();
-        let login=server.mock(|when,then|{when.method("POST").path("/accounts/signin.ac").body_includes("cdigest=digest-canary").body_includes("captcha=answer-canary");then.status(200).body(r#"{"data":{"access_token":"token-canary","oauthorize_uri":"https://academia.srmist.edu.in/exchange?from=login"}}"#);});
-        server.mock(|when, then| {
-            when.method("GET")
-                .path("/exchange")
-                .query_param("access_token", "token-canary");
-            then.status(200)
-                .header("set-cookie", "JSESSIONID=cookie-canary; Path=/")
-                .body("ok");
-        });
-        server.mock(|when, then| {
-            when.method("GET")
-                .path(ATTENDANCE)
-                .header("cookie", "JSESSIONID=cookie-canary");
-            then.status(200)
-                .body(include_str!("../tests/fixtures/academia.html"));
-        });
-        client
-            .login(
-                "example".into(),
-                "password-canary".into(),
-                Some(&challenge.challenge_id),
-                Some("answer-canary"),
-            )
-            .unwrap();
-        assert!(client.authenticated);
-        assert_eq!(client.attendance().unwrap().attendance[0].present, 8);
-        login.assert_calls(1);
-    }
-    #[test]
-    fn concurrent_recovery_is_bounded_and_rejects_foreign_actions() {
-        let server = MockServer::start();
-        let login=server.mock(|when,then|{when.method("POST").path("/accounts/signin.ac");then.status(200).body("concurrent sessions <form action='/terminate'><button name='submit' value='yes'>Terminate All Sessions</button></form>");});
-        let terminate = server.mock(|when, then| {
-            when.method("POST").path("/terminate");
-            then.status(200);
-        });
-        let mut client = Academia::new().unwrap();
-        client.http = Transport::for_test(Service::Academia, server.base_url());
-        assert_eq!(
-            client
-                .login("example".into(), "password-canary".into(), None, None)
-                .unwrap_err()
-                .code,
-            ErrorCode::SessionConflict
-        );
-        login.assert_calls(2);
-        terminate.assert_calls(1);
-        assert_eq!(
-            client
-                .terminate(
-                    "<form action='https://foreign.invalid'><button>Terminate</button></form>"
-                )
-                .unwrap_err()
-                .code,
-            ErrorCode::UnexpectedResponse
-        );
-    }
-}
 impl Academia {
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -136,14 +48,13 @@ impl Academia {
         if username.trim().is_empty() || password.is_empty() {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
-        if let Some(id) = id {
-            if self
+        if let Some(id) = id
+            && self
                 .challenge
                 .as_ref()
                 .is_none_or(|(c, _)| c.challenge_id != id)
-            {
-                return Err(CoreError::new(ErrorCode::InvalidRequest));
-            }
+        {
+            return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
         if self
             .credentials
@@ -312,5 +223,94 @@ impl Academia {
         ))?;
         let schedule = academic_parsers::timetable(&grid, &courses)?;
         Ok(TimetableData { schedule, courses })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::MockServer;
+    #[test]
+    fn academia_interactive_captcha_exchange_and_attendance() {
+        let server = MockServer::start();
+        let mut first = server.mock(|when, then| {
+            when.method("POST").path("/accounts/signin.ac");
+            then.status(200)
+                .body(r#"{"status":"fail","code":"HIP_REQUIRED","cdigest":"digest-canary"}"#);
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/accounts/p/40-10002227248/webclient/v1/captcha/digest-canary");
+            then.status(200).body("fake-image");
+        });
+        let mut client = Academia::new().unwrap();
+        client.http = Transport::for_test(Service::Academia, server.base_url());
+        let error = client
+            .login("example".into(), "password-canary".into(), None, None)
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::CaptchaRequired);
+        let challenge = error.challenge.unwrap();
+        assert!(
+            !serde_json::to_string(&challenge)
+                .unwrap()
+                .contains("digest-canary")
+        );
+        first.delete();
+        let login=server.mock(|when,then|{when.method("POST").path("/accounts/signin.ac").body_includes("cdigest=digest-canary").body_includes("captcha=answer-canary");then.status(200).body(r#"{"data":{"access_token":"token-canary","oauthorize_uri":"https://academia.srmist.edu.in/exchange?from=login"}}"#);});
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/exchange")
+                .query_param("access_token", "token-canary");
+            then.status(200)
+                .header("set-cookie", "JSESSIONID=cookie-canary; Path=/")
+                .body("ok");
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(ATTENDANCE)
+                .header("cookie", "JSESSIONID=cookie-canary");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/academia.html"));
+        });
+        client
+            .login(
+                "example".into(),
+                "password-canary".into(),
+                Some(&challenge.challenge_id),
+                Some("answer-canary"),
+            )
+            .unwrap();
+        assert!(client.authenticated);
+        assert_eq!(client.attendance().unwrap().attendance[0].present, 8);
+        login.assert_calls(1);
+    }
+    #[test]
+    fn concurrent_recovery_is_bounded_and_rejects_foreign_actions() {
+        let server = MockServer::start();
+        let login=server.mock(|when,then|{when.method("POST").path("/accounts/signin.ac");then.status(200).body("concurrent sessions <form action='/terminate'><button name='submit' value='yes'>Terminate All Sessions</button></form>");});
+        let terminate = server.mock(|when, then| {
+            when.method("POST").path("/terminate");
+            then.status(200);
+        });
+        let mut client = Academia::new().unwrap();
+        client.http = Transport::for_test(Service::Academia, server.base_url());
+        assert_eq!(
+            client
+                .login("example".into(), "password-canary".into(), None, None)
+                .unwrap_err()
+                .code,
+            ErrorCode::SessionConflict
+        );
+        login.assert_calls(2);
+        terminate.assert_calls(1);
+        assert_eq!(
+            client
+                .terminate(
+                    "<form action='https://foreign.invalid'><button>Terminate</button></form>"
+                )
+                .unwrap_err()
+                .code,
+            ErrorCode::UnexpectedResponse
+        );
     }
 }

@@ -54,14 +54,15 @@ pub fn portal_attendance(html: &str) -> Result<AttendanceData> {
                     is_portal: true,
                 });
             }
-        } else if month.is_match(&values[0]) && values.len() >= 3 {
-            if let (Ok(present), Ok(absent)) = (values[1].parse(), values[2].parse()) {
-                monthly.push(Monthly {
-                    month: values[0].clone(),
-                    present,
-                    absent,
-                });
-            }
+        } else if month.is_match(&values[0])
+            && values.len() >= 3
+            && let (Ok(present), Ok(absent)) = (values[1].parse(), values[2].parse())
+        {
+            monthly.push(Monthly {
+                month: values[0].clone(),
+                present,
+                absent,
+            });
         }
     }
     if attendance.is_empty()

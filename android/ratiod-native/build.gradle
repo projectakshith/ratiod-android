@@ -1,0 +1,81 @@
+apply plugin: 'com.android.library'
+
+def workspace = rootProject.projectDir.parentFile
+def abis = ['arm64-v8a', 'x86_64']
+def runtimeSha = '07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027'
+def modelSha = '82367bed329cace83f9828c907fab2fbd81c35c4caa695d99a57e9bc7e5ff948'
+def vocabSha = '0ba87b0dc21dec2de3f88b1612b36e3150a776122c6012f538b3d482265c9563'
+def sha256 = { File f -> java.security.MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() }
+
+android {
+    namespace 'com.ratiod.core'
+    compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion '28.2.13676358'
+    defaultConfig {
+        minSdk rootProject.ext.minSdkVersion
+        ndk { abiFilters.addAll(abis) }
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+    sourceSets {
+        main {
+            jniLibs.srcDir layout.buildDirectory.dir('generated/ort')
+            assets.srcDir layout.buildDirectory.dir('generated/assets')
+        }
+        debug.jniLibs.srcDir layout.buildDirectory.dir('generated/rust/debug')
+        release.jniLibs.srcDir layout.buildDirectory.dir('generated/rust/release')
+    }
+}
+
+configurations { onnxRuntimeNative }
+dependencies { onnxRuntimeNative 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0@aar' }
+
+tasks.register('extractOnnxRuntime', Sync) {
+    from({ configurations.onnxRuntimeNative.collect { artifact ->
+        if (sha256(artifact) != runtimeSha) throw new GradleException('ONNX Runtime artifact checksum mismatch')
+        zipTree(artifact)
+    } })
+    include abis.collect { "jni/${it}/libonnxruntime.so" }
+    eachFile { relativePath = new RelativePath(true, *relativePath.segments.drop(1)) }
+    includeEmptyDirs = false
+    into layout.buildDirectory.dir('generated/ort')
+}
+
+tasks.register('packageCoreAssets') {
+    def model = new File(workspace, 'native/tinyocr/model/captcha_crnn.onnx')
+    def vocab = new File(workspace, 'native/tinyocr/model/vocab.json')
+    inputs.files(model, vocab, new File(workspace, 'native/tinyocr/LICENSE'), new File(workspace, 'native/LICENSE-AGPL-3.0'))
+    outputs.dir layout.buildDirectory.dir('generated/assets')
+    doLast {
+        if (sha256(model) != modelSha || sha256(vocab) != vocabSha) throw new GradleException('TinyOCR asset checksum mismatch')
+        project.copy {
+            from([model, vocab]) { into 'ratiod-core' }
+            from(new File(workspace, 'native/tinyocr/LICENSE')) { into 'ratiod-core/licenses/tinyocr' }
+            from(new File(workspace, 'native/LICENSE-AGPL-3.0')) { into 'ratiod-core/licenses/core' }
+            into layout.buildDirectory.dir('generated/assets')
+        }
+    }
+}
+
+['debug', 'release'].each { variant ->
+    def buildRust = tasks.register("buildRust${variant.capitalize()}", Exec) {
+        workingDir workspace
+        inputs.files(fileTree(new File(workspace, 'native')) {
+            include '**/*.rs', '**/Cargo.toml'
+            exclude '.cache/**', '**/tests/**'
+        }, new File(workspace, 'Cargo.toml'), new File(workspace, 'Cargo.lock'), new File(workspace, 'rust-toolchain.toml'))
+        outputs.dir layout.buildDirectory.dir("generated/rust/${variant}")
+        environment 'ANDROID_NDK_HOME', android.ndkDirectory.absolutePath
+        // Native libraries must support 16 KB devices, including the Rust ELF.
+        environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
+        environment 'CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
+        def args = ['cargo', 'ndk', '-t', 'arm64-v8a', '-t', 'x86_64', '--platform', '23',
+                    '-o', layout.buildDirectory.dir("generated/rust/${variant}").get().asFile.absolutePath,
+                    'build', '--locked', '-p', 'ratiod-jni']
+        if (variant == 'release') args.add('--release')
+        commandLine args
+    }
+    tasks.matching { it.name == "merge${variant.capitalize()}JniLibFolders" || it.name == "merge${variant.capitalize()}NativeLibs" }.configureEach {
+        dependsOn buildRust, tasks.named('extractOnnxRuntime')
+    }
+}
+tasks.named('preBuild') { dependsOn tasks.named('packageCoreAssets'), tasks.named('extractOnnxRuntime') }
