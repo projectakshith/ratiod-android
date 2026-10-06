@@ -27,6 +27,7 @@ import {
 import { requestNotificationPermission, getNotifPreference, setNotifPreference } from "@/utils/shared/notifs";
 import { StudentProfile } from "@/types";
 import { useApp } from "@/context/AppContext";
+import NativeUpdateModal from "./NativeUpdateModal";
 import {
   COLOR_THEMES,
   parseTheme,
@@ -228,6 +229,7 @@ const SettingsPage = ({
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [feedbackCount, setFeedbackCount] = useState(() => parseInt(localStorage.getItem("ratiod_feedback_count") || "0"));
   const [selectedTheme, setSelectedTheme] = useState(currentTheme);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   const { uiStyle: initialStyle, colorTheme: initialColor } = parseTheme(selectedTheme);
   const [uiStyle, setUiStyle] = useState<UiStyle>(initialStyle);
@@ -449,6 +451,7 @@ const SettingsPage = ({
                 <div className="space-y-1 px-1">
                   <SettingItem icon={<Megaphone className="w-5 h-5 opacity-80 text-theme-text" />} label="Dev Drops" onClick={() => setShowAnnouncements(true)} />
                   <SettingItem icon={<PartyPopper className="w-5 h-5 opacity-80 text-theme-text" />} label="What's New" onClick={() => setShowWhatsNew(true)} />
+                  <SettingItem icon={<Download className="w-5 h-5 opacity-80 text-theme-text" />} label="Check for Updates" onClick={() => setShowUpdateModal(true)} />
                   <SettingItem icon={<MessageSquare className="w-5 h-5 opacity-80 text-theme-text" />} label="Feedback" onClick={() => { setFeedbackStatus("idle"); setFeedbackRating(0); setFeedbackMessage(""); setShowFeedback(true); }} />
                   <SettingItem icon={<Lock className="w-5 h-5 opacity-80 text-theme-text" />} label="Privacy" onClick={() => setShowPrivacy(true)} />
                   <SettingItem icon={<WhatsappIcon size={20} />} label="WhatsApp Community" onClick={() => window.open("https://chat.whatsapp.com/D7wymoQ1zrQKqf4Qs4gw91", "_blank")} />
@@ -480,6 +483,7 @@ const SettingsPage = ({
       </AnimatePresence>
 
       <PrivacyProtocol isOpen={showPrivacy} onClose={() => setShowPrivacy(false)} />
+      <NativeUpdateModal isOpen={showUpdateModal} onClose={() => setShowUpdateModal(false)} />
 
       <AnimatePresence>
         {showAnnouncements && (
