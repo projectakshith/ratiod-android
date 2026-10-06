@@ -45,6 +45,10 @@ A challenge is `{ challengeId: string, image: data-URI, ocrStatus: "available" |
 `challengeId` is opaque and process-local; it is never an SRM nonce, digest or cookie.
 It is invalidated on replacement, success, logout and process exit. Never log images
 or challenge IDs. Predicted answers stay in Rust; manual answers are submission-only.
+Any nonempty `captchaAnswer` requires the matching `challengeId`; missing or stale
+IDs return `INVALID_REQUEST` without submitting. Academia HIP challenges belong to
+the username that requested them; changing accounts requires a fresh initial login.
+Portal `loadCaptcha` starts a fresh cookie jar and clears the authenticated flag.
 
 SectionResult is `{ ok: true, data, refreshedAt: epochMilliseconds }` or
 `{ ok: false, error }`. Merge only successful sections into cache. A failure must
@@ -78,6 +82,8 @@ tokens, credentials, CAPTCHA answers or cookie values appear in responses or log
 Credentials are retained in Rust memory only until logout/account replacement/process
 exit, enabling refresh re-authentication. No session import/export or disk format is
 defined. Agent 2 must remove browser credential/cookie persistence for native flows.
+Known expired/conflicting responses clear the local authenticated flag. Transport
+failures leave the flag unchanged because they do not establish session expiry.
 An authentication success is distinct from a data fetch; call attendance/refresh
 after login. Never return raw cookies as a legacy compatibility shortcut.
 
@@ -85,4 +91,3 @@ Portal permits up to four automatic CAPTCHA submissions per authentication cycle
 with immediate stop on uncertainty, network error, invalid credentials or account
 lockout. Manual entry remains available. Academia concurrent-session termination
 is automatic by owner choice, bounded to one termination/retry per login.
-

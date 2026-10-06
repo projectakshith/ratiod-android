@@ -177,6 +177,9 @@ impl Portal {
         })
     }
     pub fn load_captcha(&mut self) -> Result<Challenge> {
+        self.http = self.http.fresh()?;
+        self.authenticated = false;
+        self.challenge = None;
         let page = self.http.get(PORTAL_LOGIN)?;
         page.successful()?;
         let html = page.text()?;
@@ -251,8 +254,20 @@ impl Portal {
         challenge_id: Option<&str>,
         answer: &str,
     ) -> Result<()> {
-        let username = username.trim().split('@').next().unwrap_or("").to_owned();
-        if username.is_empty() || password.is_empty() {
+        let mut credentials = Credentials::new(username, password);
+        credentials.username = Zeroizing::new(
+            credentials
+                .username
+                .trim()
+                .split('@')
+                .next()
+                .unwrap_or("")
+                .to_owned(),
+        );
+        if credentials.username.is_empty()
+            || credentials.password.is_empty()
+            || (!answer.is_empty() && challenge_id.is_none())
+        {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
         if let Some(id) = challenge_id
@@ -263,16 +278,9 @@ impl Portal {
         {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
-        if self
-            .credentials
-            .as_ref()
-            .is_some_and(|c| c.username.as_str() != username)
-        {
-            self.http = Transport::new(Service::Portal)?;
-            self.authenticated = false;
-            self.challenge = None;
-        }
-        self.credentials = Some(Credentials::new(username, password));
+        // Every challenge already belongs to a fresh, unauthenticated cookie jar.
+        self.authenticated = false;
+        self.credentials = Some(credentials);
         if self.challenge.is_none() {
             self.load_captcha()?;
         }
@@ -392,6 +400,102 @@ fn rejection(html: &str) -> Option<CoreError> {
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    #[test]
+    fn rejected_credentials_and_account_lock_stop_ocr_immediately() {
+        for (message, expected) in [
+            (
+                "Invalid credentials password-canary",
+                ErrorCode::InvalidCredentials,
+            ),
+            ("Account locked cookie-canary", ErrorCode::AccountLocked),
+        ] {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method("GET")
+                    .path("/srmiststudentportal/students/loginManager/youLogin.jsp");
+                then.status(200)
+                    .body("<input id='fpNonce' value='nonce'><img src='SCaptchaServlet'>");
+            });
+            server.mock(|when, then| {
+                when.method("GET")
+                    .path("/srmiststudentportal/SCaptchaServlet");
+                then.status(200).body("fake-image");
+            });
+            let submit = server.mock(|when, then| {
+                when.method("POST")
+                    .path("/srmiststudentportal/LoginServlet");
+                then.status(200)
+                    .body(format!("<div class='alert-danger'>{message}</div>"));
+            });
+            let mut portal = Portal::new().unwrap();
+            portal.http = Transport::for_test(Service::Portal, server.base_url());
+            let mut solver: Option<Box<dyn tinyocr::Solver>> =
+                Some(Box::new(FixedSolver { uncertain: false }));
+            let error = portal
+                .login(
+                    "example".into(),
+                    "password-canary".into(),
+                    None,
+                    None,
+                    &mut solver,
+                )
+                .unwrap_err();
+            assert_eq!(error.code, expected);
+            assert!(!serde_json::to_string(&error).unwrap().contains("canary"));
+            assert!(portal.credentials.is_none() && !portal.authenticated);
+            submit.assert_calls(1);
+        }
+    }
+    #[test]
+    fn stale_manual_challenge_is_rejected_without_submission() {
+        let mut portal = Portal::new().unwrap();
+        assert_eq!(
+            portal
+                .login_manual(
+                    "example".into(),
+                    "password-canary".into(),
+                    Some("stale-id"),
+                    "answer-canary"
+                )
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+    }
+    #[test]
+    fn portal_marks_fetch_components_and_match_python() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentInternalMarkDetails.jsp");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/portal-marks.html"));
+        });
+        let inner = server.mock(|when, then| {
+            when.method("POST")
+                .path("/srmiststudentportal/students/report/studentInternalMarkDetailsInner.jsp")
+                .body_includes("hdnSubjectId=synthetic-subject")
+                .body_includes("status=2");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/portal-inner.html"));
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentAttendanceDetails.jsp");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/portal-attendance.html"));
+        });
+        let mut portal = Portal::new().unwrap();
+        portal.http = Transport::for_test(Service::Portal, server.base_url());
+        portal.authenticated = true;
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/expected.json")).unwrap();
+        assert_eq!(
+            serde_json::to_value(portal.marks().unwrap()).unwrap(),
+            expected["portalMarks"]
+        );
+        inner.assert_calls(1);
+    }
     struct FixedSolver {
         uncertain: bool,
     }

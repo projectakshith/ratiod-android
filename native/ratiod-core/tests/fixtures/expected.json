@@ -200,5 +200,38 @@
         "raw_type": "Theory"
       }
     }
-  }
+  },
+  "portalMarks": [
+    {
+      "courseCode": "21CSC101J",
+      "title": "Example Course",
+      "type": "Internal",
+      "performance": "8/10",
+      "assessments": [
+        {
+          "title": "Test 1",
+          "marks": "8",
+          "total": "10",
+          "date": "2026-10-01"
+        },
+        {
+          "title": "Pending",
+          "marks": "N",
+          "total": "A",
+          "date": "2026-10-02"
+        }
+      ],
+      "totalMarkGot": 8.0,
+      "totalMaxMarks": 10.0
+    },
+    {
+      "courseCode": "21CSC102J",
+      "title": "Example Lab",
+      "type": "Internal",
+      "performance": "N/A",
+      "assessments": [],
+      "totalMarkGot": null,
+      "totalMaxMarks": null
+    }
+  ]
 }

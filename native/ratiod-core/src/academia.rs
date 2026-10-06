@@ -45,7 +45,12 @@ impl Academia {
         id: Option<&str>,
         answer: Option<&str>,
     ) -> Result<()> {
-        if username.trim().is_empty() || password.is_empty() {
+        let credentials = Credentials::new(username, password);
+        let manual = answer.is_some_and(|s| !s.is_empty());
+        if credentials.username.trim().is_empty()
+            || credentials.password.is_empty()
+            || (manual && id.is_none())
+        {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
         if let Some(id) = id
@@ -56,16 +61,20 @@ impl Academia {
         {
             return Err(CoreError::new(ErrorCode::InvalidRequest));
         }
-        if self
-            .credentials
-            .as_ref()
-            .is_some_and(|c| c.username.as_str() != username)
+        if manual
+            && self
+                .credentials
+                .as_ref()
+                .is_none_or(|c| c.username.as_str() != credentials.username.as_str())
         {
-            self.http = Transport::new(Service::Academia)?;
+            return Err(CoreError::new(ErrorCode::InvalidRequest));
+        }
+        if !manual {
+            self.http = self.http.fresh()?;
             self.challenge = None;
         }
         self.authenticated = false;
-        self.credentials = Some(Credentials::new(username, password));
+        self.credentials = Some(credentials);
         for attempt in 0..2 {
             let credentials = self.credentials.as_ref().unwrap();
             let mut form = vec![
@@ -140,7 +149,15 @@ impl Academia {
                 }
                 self.credentials = None;
                 self.challenge = None;
-                return Err(CoreError::new(ErrorCode::InvalidCredentials));
+                let locked = code.to_lowercase().contains("lock")
+                    || json["error"]["msg"]
+                        .as_str()
+                        .is_some_and(|s| s.to_lowercase().contains("locked"));
+                return Err(CoreError::new(if locked {
+                    ErrorCode::AccountLocked
+                } else {
+                    ErrorCode::InvalidCredentials
+                }));
             }
             let token = Zeroizing::new(
                 json["data"]["access_token"]
@@ -157,7 +174,15 @@ impl Academia {
             self.http.get(url.as_str())?.successful()?;
             // Authenticate against data, not merely a cookie's presence.
             let page = self.http.get(&format!("{ACADEMIA_BASE}{ATTENDANCE}"))?;
-            academic_parsers::attendance(&academic_parsers::extract(page.authenticated()?)?)?;
+            let html = page.authenticated()?;
+            let extracted = match academic_parsers::extract(html) {
+                Err(error) if error.code == ErrorCode::SessionConflict && attempt == 0 => {
+                    self.terminate(html)?;
+                    continue;
+                }
+                result => result?,
+            };
+            academic_parsers::attendance(&extracted)?;
             self.authenticated = true;
             self.challenge = None;
             return Ok(());
@@ -230,6 +255,69 @@ impl Academia {
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    #[test]
+    fn account_locked_and_unknown_manual_challenges_are_safe() {
+        let server = MockServer::start();
+        let login = server.mock(|when, then| {
+            when.method("POST").path("/accounts/signin.ac");
+            then.status(200).body(r#"{"status":"fail","code":"ACCOUNT_LOCKED","error":{"msg":"Account locked password-canary"}}"#);
+        });
+        let mut client = Academia::new().unwrap();
+        client.http = Transport::for_test(Service::Academia, server.base_url());
+        let error = client
+            .login("example".into(), "password-canary".into(), None, None)
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::AccountLocked);
+        assert!(!serde_json::to_string(&error).unwrap().contains("canary"));
+        assert!(client.credentials.is_none());
+        assert_eq!(
+            client
+                .login(
+                    "example".into(),
+                    "password-canary".into(),
+                    Some("stale-id"),
+                    Some("answer-canary")
+                )
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        login.assert_calls(1);
+    }
+    #[test]
+    fn concurrent_page_after_token_exchange_retries_only_once() {
+        let server = MockServer::start();
+        let login = server.mock(|when, then| {
+            when.method("POST").path("/accounts/signin.ac");
+            then.status(200).body(r#"{"data":{"access_token":"token-canary","oauthorize_uri":"https://academia.srmist.edu.in/exchange"}}"#);
+        });
+        server.mock(|when, then| {
+            when.method("GET").path("/exchange");
+            then.status(200);
+        });
+        server.mock(|when, then| {
+            when.method("GET").path(ATTENDANCE);
+            then.status(200).body(
+                "concurrent sessions <form action='/terminate'><button>Terminate</button></form>",
+            );
+        });
+        let terminate = server.mock(|when, then| {
+            when.method("POST").path("/terminate");
+            then.status(200);
+        });
+        let mut client = Academia::new().unwrap();
+        client.http = Transport::for_test(Service::Academia, server.base_url());
+        assert_eq!(
+            client
+                .login("example".into(), "password-canary".into(), None, None)
+                .unwrap_err()
+                .code,
+            ErrorCode::SessionConflict
+        );
+        login.assert_calls(2);
+        terminate.assert_calls(1);
+        assert!(!client.authenticated);
+    }
     #[test]
     fn academia_interactive_captcha_exchange_and_attendance() {
         let server = MockServer::start();

@@ -23,8 +23,17 @@ pub fn preprocess_with_dims(bytes: &[u8]) -> Result<(Vec<f32>, u32, u32), AppErr
         return Err(AppError::InvalidImage("empty request body".into()));
     }
 
-    let img = image::load_from_memory(bytes)
-        .map_err(|e| AppError::InvalidImage(format!("unsupported or corrupt image ({e})")))?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| AppError::InvalidImage("unsupported or corrupt image".into()))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(IMG_W);
+    limits.max_image_height = Some(IMG_H);
+    limits.max_alloc = Some(2 * 1024 * 1024);
+    reader.limits(limits);
+    let img = reader
+        .decode()
+        .map_err(|_| AppError::InvalidImage("unsupported or corrupt image".into()))?;
 
     let (w, h) = (img.width(), img.height());
     if w != IMG_W || h != IMG_H {

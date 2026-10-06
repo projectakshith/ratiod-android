@@ -40,7 +40,12 @@ impl Core {
                 if envelope.api_version != API_VERSION {
                     return Err(CoreError::new(ErrorCode::InvalidRequest));
                 }
-                self.dispatch(envelope.request)
+                let service = envelope.request.service();
+                let result = self.dispatch(envelope.request);
+                if result.as_ref().is_err_and(session_error) {
+                    self.invalidate_authentication(service);
+                }
+                result
             });
         serde_json::to_string(&Response::from_result(result)).unwrap_or_else(|_|"{\"apiVersion\":1,\"ok\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"The native operation could not complete.\",\"retryable\":false}}".into())
     }
@@ -65,11 +70,13 @@ impl Core {
             Request::Login {
                 service,
                 username,
-                password,
+                mut password,
                 challenge_id,
                 captcha_answer,
                 use_ocr,
             } => {
+                let password = std::mem::take(&mut *password);
+                let answer = captcha_answer.as_ref().map(|s| s.as_str());
                 match service {
                     Service::Portal => {
                         if use_ocr {
@@ -77,7 +84,7 @@ impl Core {
                                 username,
                                 password,
                                 challenge_id.as_deref(),
-                                captcha_answer.as_deref(),
+                                answer,
                                 &mut self.solver,
                             )?;
                         } else {
@@ -85,16 +92,14 @@ impl Core {
                                 username,
                                 password,
                                 challenge_id.as_deref(),
-                                captcha_answer.as_deref().unwrap_or(""),
+                                answer.unwrap_or(""),
                             )?;
                         }
                     }
-                    Service::Academia => self.academia.login(
-                        username,
-                        password,
-                        challenge_id.as_deref(),
-                        captcha_answer.as_deref(),
-                    )?,
+                    Service::Academia => {
+                        self.academia
+                            .login(username, password, challenge_id.as_deref(), answer)?
+                    }
                 }
                 Ok(json!({"authenticated":true,"service":service}))
             }
@@ -126,6 +131,12 @@ impl Core {
             Request::Refresh { service } => self.refresh(service),
         }
     }
+    fn invalidate_authentication(&mut self, service: Service) {
+        match service {
+            Service::Portal => self.portal.authenticated = false,
+            Service::Academia => self.academia.authenticated = false,
+        }
+    }
     fn reauthenticate(&mut self, service: Service) -> Result<()> {
         match service {
             Service::Portal => {
@@ -136,7 +147,6 @@ impl Core {
                     .ok_or_else(|| CoreError::new(ErrorCode::SessionExpired))?;
                 let (username, password) = (c.username.to_string(), c.password.to_string());
                 self.portal.authenticated = false;
-                self.portal.load_captcha()?;
                 self.portal
                     .login(username, password, None, None, &mut self.solver)
             }
@@ -187,10 +197,22 @@ impl Core {
                     .unwrap_or_else(|_| Err(CoreError::new(ErrorCode::InternalError))),
             )
         });
+        if profile.as_ref().is_err_and(session_error)
+            || marks.as_ref().is_err_and(session_error)
+            || timetable.as_ref().is_err_and(session_error)
+        {
+            self.invalidate_authentication(service);
+        }
         Ok(json!({"service":service,"sections":{
             "attendance":section(Ok(attendance)),"profile":section(profile),"marks":section(marks.map(|m|json!({"marks":m}))),"timetable":section(timetable)
         }}))
     }
+}
+fn session_error(error: &CoreError) -> bool {
+    matches!(
+        error.code,
+        ErrorCode::SessionExpired | ErrorCode::SessionConflict
+    )
 }
 fn to_value<T: serde::Serialize>(value: T) -> Result<Value> {
     serde_json::to_value(value).map_err(|_| CoreError::new(ErrorCode::InternalError))
@@ -205,6 +227,70 @@ fn section<T: serde::Serialize>(result: Result<T>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::MockServer;
+    #[test]
+    fn partial_refresh_keeps_successes_and_invalidates_expired_state() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentAttendanceDetails.jsp");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/portal-attendance.html"));
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentPersonalDetails.jsp");
+            then.status(200)
+                .body(include_str!("../tests/fixtures/portal-profile.html"));
+        });
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentInternalMarkDetails.jsp");
+            then.status(403).body("cookie-canary password-canary");
+        });
+        server.mock(|when, then| {
+            when.method("POST")
+                .path("/srmiststudentportal/students/report/studentTimeTableDetails.jsp");
+            then.status(200).body("unexpected page token-canary");
+        });
+        let mut core = Core::without_ocr().unwrap();
+        core.portal.http = Transport::for_test(Service::Portal, server.base_url());
+        core.portal.authenticated = true;
+        let wire = core.invoke(r#"{"apiVersion":1,"method":"refresh","service":"portal"}"#);
+        assert!(!wire.contains("canary"));
+        let result: Value = serde_json::from_str(&wire).unwrap();
+        let sections = &result["data"]["sections"];
+        assert_eq!(result["ok"], true);
+        assert_eq!(sections["attendance"]["ok"], true);
+        assert!(sections["attendance"]["refreshedAt"].as_u64().unwrap() > 0);
+        assert_eq!(sections["profile"]["ok"], true);
+        assert_eq!(sections["marks"]["error"]["code"], "SESSION_EXPIRED");
+        assert_eq!(sections["timetable"]["error"]["code"], "PARSER_FAILURE");
+        assert!(sections["marks"].get("data").is_none());
+        assert!(!core.portal.authenticated);
+    }
+    #[test]
+    fn expired_data_call_clears_local_state_and_manual_requires_id() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET")
+                .path("/srmiststudentportal/students/report/studentAttendanceDetails.jsp");
+            then.status(401);
+        });
+        let mut core = Core::without_ocr().unwrap();
+        core.portal.http = Transport::for_test(Service::Portal, server.base_url());
+        core.portal.authenticated = true;
+        assert!(
+            core.invoke(r#"{"apiVersion":1,"method":"getAttendance","service":"portal"}"#)
+                .contains("SESSION_EXPIRED")
+        );
+        assert!(!core.portal.authenticated);
+        for service in ["portal", "academia"] {
+            let request = json!({"apiVersion":1,"method":"login","service":service,"username":"example","password":"password-canary","captchaAnswer":"answer-canary","useOcr":false});
+            let wire = core.invoke(&request.to_string());
+            assert!(wire.contains("INVALID_REQUEST") && !wire.contains("canary"));
+        }
+    }
     #[test]
     fn contract_accepts_valid_calls_and_rejects_unknown_fields() {
         let mut core = Core::without_ocr().unwrap();

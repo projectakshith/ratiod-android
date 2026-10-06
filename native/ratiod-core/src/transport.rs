@@ -69,6 +69,13 @@ impl Transport {
             test_base: Some(base),
         }
     }
+    pub fn fresh(&self) -> Result<Self> {
+        #[cfg(test)]
+        if let Some(base) = &self.test_base {
+            return Ok(Self::for_test(self.service, base.clone()));
+        }
+        Self::new(self.service)
+    }
     fn url(&self, raw: &str) -> Result<Url> {
         let url = Url::parse(raw).map_err(|_| CoreError::new(ErrorCode::UnexpectedResponse))?;
         if !allowed(&url, self.service) {
@@ -94,7 +101,7 @@ impl Transport {
         for (key, value) in headers {
             request = request.header(*key, *value);
         }
-        read_page(request.send().map_err(map_error)?)
+        read_page(request.send().map_err(map_error)?, self.service)
     }
     pub fn post(&self, url: &str, fields: &[(String, String)], referer: &str) -> Result<Page> {
         // No request or response tracing: bodies and redirect queries contain secrets.
@@ -110,7 +117,7 @@ impl Transport {
             .form(fields)
             .send()
             .map_err(map_error)?;
-        read_page(response)
+        read_page(response, self.service)
     }
 }
 
@@ -150,8 +157,20 @@ impl Page {
         Ok(html)
     }
 }
-fn read_page(response: Response) -> Result<Page> {
+fn read_page(response: Response, service: Service) -> Result<Page> {
     let status = response.status().as_u16();
+    // Redirects stopped by the origin policy are unexpected, never a new session.
+    if (300..400).contains(&status)
+        && let Some(location) = response.headers().get("location")
+    {
+        let target = location
+            .to_str()
+            .ok()
+            .and_then(|s| response.url().join(s).ok());
+        if target.as_ref().is_none_or(|url| !allowed(url, service)) {
+            return Err(CoreError::new(ErrorCode::UnexpectedResponse));
+        }
+    }
     let path = response.url().path().to_string(); // Intentionally discard query (Academia token exchange).
     let content_type = response
         .headers()
@@ -166,7 +185,7 @@ fn read_page(response: Response) -> Result<Page> {
     response
         .take(MAX_BODY + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| CoreError::new(ErrorCode::NetworkError))?;
+        .map_err(map_read_error)?;
     if bytes.len() as u64 > MAX_BODY {
         return Err(CoreError::new(ErrorCode::UnexpectedResponse));
     }
@@ -177,16 +196,12 @@ fn read_page(response: Response) -> Result<Page> {
         bytes,
     })
 }
+fn map_read_error(error: std::io::Error) -> CoreError {
+    CoreError::new(cause_code(&error).unwrap_or(ErrorCode::NetworkError))
+}
 pub fn map_error(error: reqwest::Error) -> CoreError {
-    if error.is_timeout() {
-        return CoreError::new(ErrorCode::Timeout);
-    }
-    let mut source: Option<&(dyn Error + 'static)> = Some(&error);
-    while let Some(cause) = source {
-        if cause.downcast_ref::<rustls::Error>().is_some() {
-            return CoreError::new(ErrorCode::TlsError);
-        }
-        source = cause.source();
+    if let Some(code) = cause_code(&error) {
+        return CoreError::new(code);
     }
     CoreError::new(
         if error.is_connect() || error.is_request() || error.is_body() {
@@ -196,10 +211,121 @@ pub fn map_error(error: reqwest::Error) -> CoreError {
         },
     )
 }
+fn cause_code(mut cause: &(dyn Error + 'static)) -> Option<ErrorCode> {
+    for _ in 0..32 {
+        if cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|e| e.is_timeout())
+        {
+            return Some(ErrorCode::Timeout);
+        }
+        if cause.downcast_ref::<rustls::Error>().is_some() {
+            return Some(ErrorCode::TlsError);
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            if io.kind() == std::io::ErrorKind::TimedOut {
+                return Some(ErrorCode::Timeout);
+            }
+            // io::Error::source can skip its wrapped error's own identity.
+            if let Some(inner) = io.get_ref() {
+                cause = inner;
+                continue;
+            }
+        }
+        cause = cause.source()?;
+    }
+    None
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn network_timeout_foreign_redirect_and_untrusted_tls_are_distinct() {
+        use std::{net::TcpListener, sync::Arc};
+        let server = httpmock::MockServer::start();
+        server.mock(|when, then| {
+            when.method("GET").path("/slow");
+            then.status(200).delay(Duration::from_millis(100));
+        });
+        let client = Client::builder()
+            .timeout(Duration::from_millis(20))
+            .build()
+            .unwrap();
+        assert_eq!(
+            map_error(
+                client
+                    .get(format!("{}/slow", server.base_url()))
+                    .send()
+                    .unwrap_err()
+            )
+            .code,
+            ErrorCode::Timeout
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let closed = listener.local_addr().unwrap();
+        drop(listener);
+        let client = Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        assert_eq!(
+            map_error(
+                client
+                    .get(format!("http://{closed}/password-canary"))
+                    .send()
+                    .unwrap_err()
+            )
+            .code,
+            ErrorCode::NetworkError
+        );
+        server.mock(|when, then| {
+            when.method("GET").path("/srmiststudentportal/foreign");
+            then.status(302).header(
+                "location",
+                "https://foreign.invalid/?access_token=token-canary",
+            );
+        });
+        let transport = Transport::for_test(Service::Portal, server.base_url());
+        assert!(
+            matches!(transport.get(&format!("{PORTAL_BASE}/foreign")), Err(e) if e.code == ErrorCode::UnexpectedResponse)
+        );
+
+        let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let key =
+            rustls::pki_types::PrivatePkcs8KeyDer::from(generated.signing_key.serialize_der());
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![generated.cert.der().clone()], key.into())
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut connection = rustls::ServerConnection::new(Arc::new(config)).unwrap();
+            let _ = connection.complete_io(&mut stream);
+        });
+        let client = Client::builder()
+            .tls_certs_only(
+                webpki_root_certs::TLS_SERVER_ROOT_CERTS
+                    .iter()
+                    .filter_map(|c| reqwest::Certificate::from_der(c.as_ref()).ok()),
+            )
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let upstream = client
+            .get(format!("https://127.0.0.1:{}/", address.port()))
+            .send()
+            .unwrap_err();
+        let error = map_error(upstream);
+        worker.join().unwrap();
+        assert_eq!(error.code, ErrorCode::TlsError);
+        assert!(!serde_json::to_string(&error).unwrap().contains("canary"));
+    }
     #[test]
     fn origin_policy_blocks_cleartext_and_foreign_hosts() {
         for url in [

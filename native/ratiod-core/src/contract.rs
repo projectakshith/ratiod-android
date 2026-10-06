@@ -1,5 +1,6 @@
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 pub const API_VERSION: u32 = 1;
 
@@ -38,11 +39,11 @@ pub enum Request {
     Login {
         service: Service,
         username: String,
-        password: String,
+        password: Zeroizing<String>,
         #[serde(default)]
         challenge_id: Option<String>,
         #[serde(default)]
-        captcha_answer: Option<String>,
+        captcha_answer: Option<Zeroizing<String>>,
         #[serde(default = "default_true")]
         use_ocr: bool,
     },
@@ -60,6 +61,22 @@ pub enum Request {
     Refresh { service: Service },
     #[serde(rename = "clearSession")]
     ClearSession { service: Service },
+}
+impl Request {
+    pub fn service(&self) -> Service {
+        match self {
+            Self::CheckReachability { service }
+            | Self::LoadCaptcha { service }
+            | Self::Login { service, .. }
+            | Self::GetSessionState { service }
+            | Self::GetAttendance { service }
+            | Self::GetProfile { service }
+            | Self::GetMarks { service }
+            | Self::GetTimetable { service }
+            | Self::Refresh { service }
+            | Self::ClearSession { service } => *service,
+        }
+    }
 }
 fn default_true() -> bool {
     true

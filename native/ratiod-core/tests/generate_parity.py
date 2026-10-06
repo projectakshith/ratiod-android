@@ -39,5 +39,18 @@ expected = {
     "portalProfile": PortalProfileService.parse(read("portal-profile.html")),
     "portalTimetable": {"schedule": schedule, "courses": portal_courses},
 }
+subjects = PortalMarksService.parse_main(read("portal-marks.html"))
+for subject in subjects:
+    subject.pop("subjectId")
+    subject.pop("status")
+    subject["assessments"] = PortalMarksService.parse_inner(read("portal-inner.html"))
+# PortalSession.get_marks_data appends attendance-only courses in this shape.
+codes = {subject["courseCode"].strip().lower() for subject in subjects}
+for course in portal_att:
+    if course["code"].strip().lower() not in codes:
+        subjects.append({"courseCode": course["code"], "title": course["title"],
+                         "type": "Internal", "performance": "N/A", "assessments": [],
+                         "totalMarkGot": None, "totalMaxMarks": None})
+expected["portalMarks"] = subjects
 (root / "expected.json").write_text(json.dumps(expected, indent=2) + "\n")
 print("Generated synthetic parser expectations.")

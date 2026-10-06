@@ -48,17 +48,22 @@ fn unescape(raw: &str) -> Result<String> {
             'r' => out.push('\r'),
             't' => out.push('\t'),
             kind @ ('u' | 'x') => {
-                let hex: String = chars
-                    .by_ref()
-                    .take(if kind == 'u' { 4 } else { 2 })
-                    .collect();
+                let length = if kind == 'u' { 4 } else { 2 };
+                let hex: String = chars.by_ref().take(length).collect();
+                if hex.len() != length {
+                    return Err(CoreError::new(ErrorCode::ParserFailure));
+                }
                 let mut value = u32::from_str_radix(&hex, 16)
                     .map_err(|_| CoreError::new(ErrorCode::ParserFailure))?;
                 if (0xd800..=0xdbff).contains(&value) {
                     if chars.next() != Some('\\') || chars.next() != Some('u') {
                         return Err(CoreError::new(ErrorCode::ParserFailure));
                     }
-                    let low = u32::from_str_radix(&chars.by_ref().take(4).collect::<String>(), 16)
+                    let low_hex = chars.by_ref().take(4).collect::<String>();
+                    if low_hex.len() != 4 {
+                        return Err(CoreError::new(ErrorCode::ParserFailure));
+                    }
+                    let low = u32::from_str_radix(&low_hex, 16)
                         .map_err(|_| CoreError::new(ErrorCode::ParserFailure))?;
                     if !(0xdc00..=0xdfff).contains(&low) {
                         return Err(CoreError::new(ErrorCode::ParserFailure));
