@@ -31,6 +31,8 @@ android/app/src/main/assets/public/
 *.swo
 
 # Logs
+target/
+native/.cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

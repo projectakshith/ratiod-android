@@ -1,0 +1,15 @@
+[package]
+name = "ratiod-jni"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "ratiod_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ratiod-core = { path = "../ratiod-core" }
+serde_json.workspace = true
+
