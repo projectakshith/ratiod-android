@@ -466,6 +466,9 @@ mod tests {
     fn unknown_tables_do_not_become_successful_empty_marks() {
         let unexpected = "<table><tr><td>Maintenance</td></tr></table>";
         assert!(
+            matches!(crate::portal_parsers::marks_inner(unexpected), Err(e) if e.code == ErrorCode::ParserFailure)
+        );
+        assert!(
             matches!(crate::portal_parsers::marks_main(unexpected), Err(e) if e.code == ErrorCode::ParserFailure)
         );
         assert!(
@@ -474,6 +477,7 @@ mod tests {
         let empty = "<table><tr><th>Course Code</th><th>Internal Marks</th></tr></table>";
         assert!(crate::portal_parsers::marks_main(empty).unwrap().is_empty());
         assert!(crate::academic_parsers::marks(empty).unwrap().is_empty());
+        assert!(crate::portal_parsers::marks_inner("<table><thead><tr><th>Component Name</th><th>Marks</th></tr></thead><tbody></tbody></table>").unwrap().is_empty());
     }
     #[test]
     fn portal_marks_fetch_components_and_match_python() {

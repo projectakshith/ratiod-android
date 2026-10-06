@@ -66,7 +66,7 @@ pub(crate) fn marks_inner(html: &str) -> Result<Vec<Assessment>> {
     if doc.select(&select("table")).next().is_none() {
         return Err(CoreError::new(ErrorCode::ParserFailure));
     }
-    Ok(doc
+    let result: Vec<_> = doc
         .select(&select("table tbody tr"))
         .filter_map(|row| {
             let c = cells(row);
@@ -81,7 +81,21 @@ pub(crate) fn marks_inner(html: &str) -> Result<Vec<Assessment>> {
                 date: Some(c[0].clone()),
             })
         })
-        .collect())
+        .collect();
+    let empty_components = doc.select(&select("table")).any(|table| {
+        let content = text(table).to_lowercase();
+        ["no records", "no data", "no marks"]
+            .iter()
+            .any(|m| content.contains(m))
+            || table.select(&select("tr")).next().is_some_and(|row| {
+                let header = text(row).to_lowercase();
+                header.contains("component") && header.contains("mark")
+            })
+    });
+    if result.is_empty() && !empty_components {
+        return Err(CoreError::new(ErrorCode::ParserFailure));
+    }
+    Ok(result)
 }
 pub fn profile(html: &str) -> Result<Profile> {
     let doc = Html::parse_document(html);
