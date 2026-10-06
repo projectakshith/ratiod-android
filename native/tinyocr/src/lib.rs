@@ -36,7 +36,9 @@ impl Engine {
         let failure = |_| AppError::Backend("model initialization failed".into());
         let builder = Session::builder().map_err(failure)?;
         let builder = builder
-            .with_optimization_level(GraphOptimizationLevel::Level3)
+            // API 20 runtime uses the older ORT_ENABLE_ALL enum value. Level2 is
+            // stable across both runtimes and preserves verified model outputs.
+            .with_optimization_level(GraphOptimizationLevel::Level2)
             .map_err(|_| AppError::Backend("model initialization failed".into()))?;
         let mut builder = builder
             .with_intra_threads(1)
