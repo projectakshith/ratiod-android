@@ -1,6 +1,7 @@
 /**
  * Ratio'd — Native Android & Web Backend Adapter
  * Bridges Next.js frontend calls to the on-device native Android plugin
+ * (NativeCore Rust + TinyCRNN OCR or OkHttp fallback)
  * or falls back to HTTP proxy in web development.
  */
 
@@ -11,11 +12,204 @@ function jsonResponse(data: any, status = 200): Response {
   });
 }
 
+function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: string) {
+  const attSection = sec?.attendance?.ok ? sec.attendance.data : { attendance: [], monthly: [] };
+  const profSection = sec?.profile?.ok ? sec.profile.data : (fallbackUsername ? { name: fallbackUsername, regNo: fallbackUsername } : {});
+  const marksSection = sec?.marks?.ok ? sec.marks.data : { marks: [] };
+  const ttSection = sec?.timetable?.ok ? sec.timetable.data : { schedule: {}, courses: {} };
+
+  return {
+    success: true,
+    isPortal,
+    attendance: attSection.attendance || [],
+    monthly: attSection.monthly || [],
+    profile: profSection || {},
+    marks: marksSection.marks || [],
+    schedule: ttSection.schedule || {},
+    timetable: ttSection.schedule || {},
+    courses: ttSection.courses || {}
+  };
+}
+
 async function handleNativeBridge(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const plugin = (window as any).Capacitor?.Plugins?.PortalProbe;
   if (!plugin) {
     throw new Error("Capacitor PortalProbe plugin not found");
   }
+
+  const isNative = await plugin.isNativeReady().then((r: any) => Boolean(r?.ready)).catch(() => false);
+
+  // -------------------------------------------------------------
+  // PATH A: NativeCore Engine (Rust + TinyCRNN OCR + JNI)
+  // -------------------------------------------------------------
+  if (isNative) {
+    // 1. Portal CAPTCHA
+    if (endpoint === "/portal/captcha") {
+      try {
+        const res = await plugin.nativeInvoke({
+          request: { apiVersion: 1, service: "portal", method: "loadCaptcha" }
+        });
+        const challenge = res.data || res.error?.challenge;
+        if (challenge) {
+          return jsonResponse({
+            session: challenge.challengeId,
+            cdigest: challenge.challengeId,
+            image: challenge.image,
+            captcha_image: challenge.image,
+            ocrStatus: challenge.ocrStatus || "available"
+          });
+        }
+        return jsonResponse({ detail: res.error?.message || "Failed to load portal captcha" }, 503);
+      } catch (e: any) {
+        return jsonResponse({ detail: e.message || "Native CAPTCHA exception" }, 503);
+      }
+    }
+
+    // 2. Portal Login
+    if (endpoint === "/portal/login") {
+      try {
+        const creds = JSON.parse((options.body as string) || "{}");
+        const hasManualCaptcha = Boolean(creds.captcha && creds.captcha.trim().length > 0);
+        const loginReq: any = {
+          apiVersion: 1,
+          service: "portal",
+          method: "login",
+          username: creds.username,
+          password: creds.password,
+          useOcr: !hasManualCaptcha
+        };
+        const challengeId = creds.cdigest || creds.session || creds.challengeId;
+        if (challengeId) {
+          loginReq.challengeId = challengeId;
+        }
+        if (hasManualCaptcha) {
+          loginReq.captchaAnswer = creds.captcha.trim();
+        }
+
+        const loginRes = await plugin.nativeInvoke({ request: loginReq });
+
+        if (loginRes.ok) {
+          // Refresh fresh data via NativeCore
+          const refreshRes = await plugin.nativeInvoke({
+            request: { apiVersion: 1, service: "portal", method: "refresh" }
+          });
+          const merged = extractRefreshSections(refreshRes.data?.sections, true, creds.username);
+          return jsonResponse(merged);
+        } else {
+          const err = loginRes.error || {};
+          if (err.code === "CAPTCHA_REQUIRED" || err.code === "CAPTCHA_REJECTED") {
+            const ch = err.challenge;
+            return jsonResponse({
+              success: false,
+              detail: {
+                type: "WRONG_CAPTCHA",
+                image: ch?.image,
+                captcha_image: ch?.image,
+                cdigest: ch?.challengeId,
+                session: ch?.challengeId,
+                message: err.message || "Enter the CAPTCHA to continue."
+              }
+            }, 401);
+          }
+          return jsonResponse({
+            success: false,
+            detail: err.message || "Portal login failed"
+          }, 401);
+        }
+      } catch (e: any) {
+        return jsonResponse({ detail: e.message || "Portal login exception" }, 500);
+      }
+    }
+
+    // 3. Academia Login
+    if (endpoint === "/login") {
+      try {
+        const creds = JSON.parse((options.body as string) || "{}");
+        const loginReq: any = {
+          apiVersion: 1,
+          service: "academia",
+          method: "login",
+          username: creds.username,
+          password: creds.password,
+          useOcr: false
+        };
+        const challengeId = creds.cdigest || creds.challengeId;
+        if (challengeId) {
+          loginReq.challengeId = challengeId;
+        }
+        if (creds.captcha) {
+          loginReq.captchaAnswer = creds.captcha.trim();
+        }
+
+        const loginRes = await plugin.nativeInvoke({ request: loginReq });
+
+        if (loginRes.ok) {
+          const refreshRes = await plugin.nativeInvoke({
+            request: { apiVersion: 1, service: "academia", method: "refresh" }
+          });
+          const merged = extractRefreshSections(refreshRes.data?.sections, false, creds.username);
+          return jsonResponse(merged);
+        } else {
+          const err = loginRes.error || {};
+          if (err.code === "CAPTCHA_REQUIRED" || err.code === "CAPTCHA_REJECTED") {
+            const ch = err.challenge;
+            return jsonResponse({
+              success: false,
+              detail: {
+                type: "CAPTCHA_REQUIRED",
+                image: ch?.image,
+                captcha_image: ch?.image,
+                cdigest: ch?.challengeId,
+                session: ch?.challengeId,
+                message: err.message || "CAPTCHA required"
+              }
+            }, 401);
+          }
+          return jsonResponse({
+            success: false,
+            detail: err.message || "Invalid credentials"
+          }, 401);
+        }
+      } catch (e: any) {
+        return jsonResponse({ detail: e.message || "Academia login failed" }, 500);
+      }
+    }
+
+    // 4. Data Refresh
+    if (endpoint === "/portal/refresh") {
+      try {
+        const refreshRes = await plugin.nativeInvoke({
+          request: { apiVersion: 1, service: "portal", method: "refresh" }
+        });
+        if (refreshRes.ok) {
+          const merged = extractRefreshSections(refreshRes.data?.sections, true);
+          return jsonResponse(merged);
+        }
+        return jsonResponse({ detail: refreshRes.error?.message || "Refresh failed" }, 500);
+      } catch (e: any) {
+        return jsonResponse({ detail: e.message || "Refresh failed" }, 500);
+      }
+    }
+
+    if (endpoint === "/refresh") {
+      try {
+        const refreshRes = await plugin.nativeInvoke({
+          request: { apiVersion: 1, service: "academia", method: "refresh" }
+        });
+        if (refreshRes.ok) {
+          const merged = extractRefreshSections(refreshRes.data?.sections, false);
+          return jsonResponse(merged);
+        }
+        return jsonResponse({ detail: refreshRes.error?.message || "Refresh failed" }, 500);
+      } catch (e: any) {
+        return jsonResponse({ detail: e.message || "Refresh failed" }, 500);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // PATH B: Java OkHttp Probe Fallback
+  // -------------------------------------------------------------
 
   // 1. Portal CAPTCHA Challenge
   if (endpoint === "/portal/captcha") {
@@ -71,7 +265,6 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       });
 
       if (loginRes.ok) {
-        // Fetch fresh attendance immediately
         const attRes = await plugin.getAttendance();
         return jsonResponse({
           success: true,
@@ -83,7 +276,6 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       } else {
         const isWrongCaptcha = loginRes.reason === "wrong_captcha";
         if (isWrongCaptcha) {
-          // Attempt to load a fresh captcha for retry
           let freshImage = null;
           let freshSid = null;
           try {
@@ -187,7 +379,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
   if (endpoint === "/captcha/solve") {
     return jsonResponse({
       ok: false,
-      detail: "On-device OCR manual fallback active."
+      detail: "On-device OCR active natively."
     }, 200);
   }
 
