@@ -14,7 +14,9 @@ String nativeInvoke(long handle, String requestJson);
 void nativeDestroy(long handle);
 ```
 
-The library is `ratiod_core`. Paths must point to APK-packaged assets copied to
+The library is `ratiod_core`, packaged by `:ratiod-native` alongside `onnxruntime`.
+APK asset names are `ratiod-core/captcha_crnn.onnx` and `ratiod-core/vocab.json`.
+Paths must point to APK-packaged assets copied to
 app-private storage by the adapter. Missing OCR assets disable OCR but do not
 disable manual login. Handle 0 means initialization failed. Handles remain in
 Java; never expose them through Capacitor. Invoke on a background executor.
@@ -53,6 +55,10 @@ Portal `loadCaptcha` starts a fresh cookie jar and clears the authenticated flag
 SectionResult is `{ ok: true, data, refreshedAt: epochMilliseconds }` or
 `{ ok: false, error }`. Merge only successful sections into cache. A failure must
 not erase good cached data. Session failure at refresh entry is a top-level error.
+Sections are exactly `attendance`, `profile`, `marks`, `timetable`, using the
+corresponding method's success data shape. `refresh` attempts at most one
+re-authentication with credentials already in Rust RAM before returning an entry
+failure. It may then return a CAPTCHA challenge requiring interactive `login`.
 
 ## Models
 
@@ -65,10 +71,81 @@ Wire field names preserve Python behavior and the current UI's aliases:
   `totalMarkGot`, `totalMaxMarks`; assessment: `title`, `marks`, `total`, optional `date`.
   Missing numeric totals are null, not zero.
 - Course: `code`, `name`, `credits`, `type`, `raw_type`, `faculty`, `room`, `slot`.
+  Portal also includes `title`, `building`, `floor`, `room_name`.
   Academia course maps are keyed by slot; Portal maps are keyed by course code.
 - Schedule: day label -> time range -> slot object containing `slot`, `course`,
   `code`, `type`, `raw_type`, `room`, `faculty`, `time`, with Portal aliases
   `courseCode`, `courseTitle`, `name`, `credits`.
+
+## Wire types
+
+Strings/numbers below are the exact version 1 field types; omitted optional
+aliases differ from explicit nullable numeric totals. JSON has no undefined values.
+
+```ts
+type Service = "portal" | "academia";
+type Challenge = {
+  challengeId: string; image: string;
+  ocrStatus: "available" | "unavailable" | "uncertain";
+};
+type ErrorCode = "NETWORK_ERROR" | "TIMEOUT" | "TLS_ERROR"
+  | "INVALID_CREDENTIALS" | "CAPTCHA_REQUIRED" | "CAPTCHA_REJECTED"
+  | "ACCOUNT_LOCKED" | "SESSION_EXPIRED" | "SESSION_CONFLICT"
+  | "UNEXPECTED_RESPONSE" | "PARSER_FAILURE" | "INVALID_REQUEST"
+  | "INTERNAL_ERROR" | "OCR_UNAVAILABLE" | "OCR_UNCERTAIN";
+type NativeError = {
+  code: ErrorCode; message: string; retryable: boolean; challenge?: Challenge;
+};
+type NativeResponse<T> =
+  | { apiVersion: 1; ok: true; data: T }
+  | { apiVersion: 1; ok: false; error: NativeError };
+type NativeRequest = { apiVersion: 1; service: Service } & (
+  | { method: "login"; username: string; password: string;
+      challengeId?: string; captchaAnswer?: string; useOcr?: boolean }
+  | { method: "checkReachability" | "loadCaptcha" | "getSessionState"
+      | "getAttendance" | "getProfile" | "getMarks" | "getTimetable"
+      | "refresh" | "clearSession" }
+);
+type Attendance = {
+  code: string; title: string; category: string; slot: string;
+  conducted: number; absent: number; present: number;
+  percent: number; isPortal: boolean;
+};
+type Monthly = { month: string; present: number; absent: number };
+type AttendanceData = { attendance: Attendance[]; monthly: Monthly[] };
+type Profile = {
+  name: string; regNo: string; batch: string; semester: string;
+  dept: string; section: string; mobile: string; program: string;
+};
+type Assessment = { title: string; marks: string; total: string; date?: string };
+type Marks = {
+  courseCode: string; title?: string; type: string; performance: string;
+  assessments: Assessment[]; totalMarkGot: number | null; totalMaxMarks: number | null;
+};
+type Course = {
+  code: string; name: string; credits: string; type: string; raw_type: string;
+  faculty: string; room: string; slot: string;
+  title?: string; building?: string; floor?: string; room_name?: string;
+};
+type ScheduleSlot = {
+  code: string; course: string; slot: string; time: string;
+  type: string; raw_type: string; room: string; faculty: string;
+  courseCode?: string; courseTitle?: string; name?: string; credits?: string;
+};
+type TimetableData = {
+  schedule: Record<string, Record<string, ScheduleSlot>>;
+  courses: Record<string, Course>;
+};
+type SectionResult<T> =
+  | { ok: true; data: T; refreshedAt: number }
+  | { ok: false; error: NativeError };
+type RefreshData = { service: Service; sections: {
+  attendance: SectionResult<AttendanceData>;
+  profile: SectionResult<Profile>;
+  marks: SectionResult<{ marks: Marks[] }>;
+  timetable: SectionResult<TimetableData>;
+} };
+```
 
 ## Errors and security
 
@@ -91,3 +168,7 @@ Portal permits up to four automatic CAPTCHA submissions per authentication cycle
 with immediate stop on uncertainty, network error, invalid credentials or account
 lockout. Manual entry remains available. Academia concurrent-session termination
 is automatic by owner choice, bounded to one termination/retry per login.
+The supplied model only supports Portal challenges; Academia HIP always uses manual
+entry. OCR uncertainty/failure during login is `CAPTCHA_REQUIRED` with challenge
+`ocrStatus: "uncertain" | "unavailable"`. `OCR_UNAVAILABLE` / `OCR_UNCERTAIN` are
+reserved codes; no standalone predicted-answer method is exposed in version 1.

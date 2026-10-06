@@ -44,7 +44,7 @@ for subject in subjects:
     subject.pop("subjectId")
     subject.pop("status")
     subject["assessments"] = PortalMarksService.parse_inner(read("portal-inner.html"))
-# PortalSession.get_marks_data appends attendance-only courses in this shape.
+# PortalClient.get_marks_data appends attendance-only courses in this shape.
 codes = {subject["courseCode"].strip().lower() for subject in subjects}
 for course in portal_att:
     if course["code"].strip().lower() not in codes:
