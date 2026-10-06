@@ -16,7 +16,8 @@ export default function Navbar() {
 
   return (
     <nav
-      className="px-6 py-8 flex justify-between items-center bg-theme-bg border-t border-theme-border"
+      className="px-6 pt-5 flex justify-between items-center bg-theme-bg border-t border-theme-border"
+      style={{ paddingBottom: "max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))" }}
     >
       {tabs.map((tab) => {
         const isActive = pathname === tab.path;

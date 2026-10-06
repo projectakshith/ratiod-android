@@ -1,9 +1,10 @@
 "use client";
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Loader2, AlertCircle, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { EncryptionUtils } from "@/utils/shared/Encryption";
 import { useApp } from "@/context/AppContext";
+import { fetchWithLoadBalancer } from "@/utils/backendProxy";
 import { useRouter } from "next/navigation";
 import LoadingPage from "./LoadingPage";
 
@@ -19,10 +20,15 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [password, setPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadingCaptcha, setLoadingCaptcha] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [captchaInput, setCaptchaInput] = useState<string>("");
   const [captchaImage, setCaptchaImage] = useState<string | null>(null);
   const [cdigest, setCdigest] = useState<string | null>(null);
+  const [captchaFields, setCaptchaFields] = useState<any>({});
+  const [domainFieldName, setDomainFieldName] = useState<string>("dtoken_x");
+  const [captchaFieldName, setCaptchaFieldName] = useState<string>("cptoken_x");
+  const [randomDelimiter, setRandomDelimiter] = useState<string>("0000");
 
   const [isExiting, setIsExiting] = useState(false);
 
@@ -31,13 +37,49 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     return cleanVal.includes("@") ? cleanVal : `${cleanVal}@srmist.edu.in`;
   };
 
+  const fetchPortalCaptcha = async () => {
+    setLoadingCaptcha(true);
+    setError("");
+    try {
+      const res = await fetchWithLoadBalancer("/portal/captcha", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCaptchaImage(data.captcha_image || data.image);
+        setCdigest(data.session || data.cdigest);
+        setCaptchaInput("");
+        if (data.loginFormFields) setCaptchaFields(data.loginFormFields);
+        if (data.domainFieldName) setDomainFieldName(data.domainFieldName);
+        if (data.captchaFieldName) setCaptchaFieldName(data.captchaFieldName);
+        if (data.randomDelimiter) setRandomDelimiter(data.randomDelimiter);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.detail || "Could not fetch security check");
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to reach Student Portal");
+    } finally {
+      setLoadingCaptcha(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) return;
 
+    if (loginMode === "portal" && !captchaInput.trim()) {
+      setError("Please enter the security check characters.");
+      if (!captchaImage) {
+        fetchPortalCaptcha();
+      }
+      return;
+    }
+
     setError("");
     const fullUsername = loginMode === "academia" ? formatUsername(username) : username.trim();
-    const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
 
     try {
       EncryptionUtils.cleanOldKeys();
@@ -49,50 +91,62 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         username: fullUsername,
         password: password,
         cookies: savedCookies,
-        captcha: captchaInput || undefined,
+        captcha: captchaInput.trim() || undefined,
         cdigest: cdigest || undefined,
+        loginFormFields: captchaFields,
+        domainFieldName: domainFieldName,
+        captchaFieldName: captchaFieldName,
+        randomDelimiter: randomDelimiter,
       };
 
-      const isMobile = window.innerWidth < 768;
       const loginFn = loginMode === "portal" ? performPortalLogin : performLogin;
 
-      if (!isOnboarded && isMobile) {
-        setIsExiting(true);
-        loginFn(creds).catch(() => {});
-        setTimeout(() => {
-          router.push("/onboarding");
-        }, 300);
-      } else {
-        setLoading(true);
-        try {
-          const data = await loginFn(creds);
-          onLogin(data);
-        } catch (err: any) {
-          const isCaptchaError = err?.type === "CAPTCHA_REQUIRED" || err?.type === "WRONG_CAPTCHA" || !!err?.image || !!err?.captcha_image;
-          if (isCaptchaError) {
-            setCaptchaImage(err.image || err.captcha_image);
-            setCdigest(err.cdigest || err.session);
-            setError(err.message || "Please enter the security check.");
-            setCaptchaInput("");
+      setLoading(true);
+      try {
+        const data = await loginFn(creds);
+        onLogin(data);
+      } catch (err: any) {
+        const isCaptchaError = err?.type === "CAPTCHA_REQUIRED" || err?.type === "WRONG_CAPTCHA" || !!err?.image || !!err?.captcha_image;
+        if (isCaptchaError) {
+          setCaptchaImage(err.image || err.captcha_image);
+          setCdigest(err.cdigest || err.session);
+          if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
+          if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
+          if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
+          if (err.randomDelimiter) setRandomDelimiter(err.randomDelimiter);
+          setError(err.message || "Invalid security check. Please enter the new one.");
+          setCaptchaInput("");
+        } else {
+          if (loginMode === "portal") {
+            fetchPortalCaptcha();
           } else {
             setCaptchaImage(null);
             setCdigest(null);
-            const msg = typeof err === "string" ? err : err?.message || err?.detail || "Authentication failed.";
-            setError(msg);
           }
-          setLoading(false);
+          const msg = typeof err === "string" ? err : err?.message || err?.detail || "Authentication failed.";
+          setError(msg);
         }
+      } finally {
+        setLoading(false);
       }
     } catch (err: any) {
       const isCaptchaError = err?.type === "CAPTCHA_REQUIRED" || err?.type === "WRONG_CAPTCHA" || !!err?.image || !!err?.captcha_image;
       if (isCaptchaError) {
         setCaptchaImage(err.image || err.captcha_image);
         setCdigest(err.cdigest || err.session);
+        if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
+        if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
+        if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
+        if (err.randomDelimiter) setRandomDelimiter(err.randomDelimiter);
         setError(err.message || "Please enter the security check.");
         setCaptchaInput("");
       } else {
-        setCaptchaImage(null);
-        setCdigest(null);
+        if (loginMode === "portal") {
+          fetchPortalCaptcha();
+        } else {
+          setCaptchaImage(null);
+          setCdigest(null);
+        }
         const msg = typeof err === "string" ? err : err?.message || err?.detail || "Authentication failed.";
         setError(msg);
       }
@@ -146,7 +200,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         animate={isExiting ? "exit" : "visible"}
         exit="exit"
         variants={containerVariants}
-        className="h-screen w-full flex flex-col justify-between md:justify-center p-8 md:p-24 md:gap-12 relative bg-[#0c30ff] overflow-hidden"
+        className="w-full min-h-full flex-1 flex flex-col justify-between md:justify-center px-6 py-4 md:p-24 md:gap-12 relative bg-[#0c30ff] overflow-y-auto"
       >
         <motion.header variants={itemVariants} className="relative z-10">
           <h1
@@ -157,8 +211,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           </h1>
         </motion.header>
 
-        <motion.main variants={itemVariants} className="relative z-10 w-full max-w-xl mt-auto md:mt-0 pb-12 md:pb-0">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-10 md:gap-12">
+        <motion.main variants={itemVariants} className="relative z-10 w-full max-w-xl mt-auto md:mt-0 pb-6 md:pb-0">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-8 md:gap-12">
             <div className="flex items-center gap-4">
               <button
                 type="button"
@@ -183,9 +237,8 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 onClick={() => {
                   setLoginMode("portal");
                   setError("");
-                  setCaptchaImage(null);
-                  setCdigest(null);
                   setCaptchaInput("");
+                  fetchPortalCaptcha();
                 }}
                 className={`text-[11px] font-mono uppercase tracking-[0.25em] transition-all pb-1 ${
                   loginMode === "portal"
@@ -252,21 +305,33 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   exit={{ opacity: 0, height: 0 }}
                   className="group relative"
                 >
-                  <label className="text-[10px] font-mono uppercase tracking-[0.3em] text-white/60 mb-2 block">
-                    Security Check
-                  </label>
-                  <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-mono uppercase tracking-[0.3em] text-white/60 block">
+                      Security Check
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => fetchPortalCaptcha()}
+                      disabled={loadingCaptcha}
+                      className="text-white/40 hover:text-[#ceff1c] text-[10px] font-mono flex items-center gap-1 uppercase tracking-wider"
+                    >
+                      <RefreshCw size={12} className={loadingCaptcha ? "animate-spin" : ""} />
+                      <span>reload</span>
+                    </button>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
                     <div className="relative flex-1 flex items-center border-b-[1.5px] border-white focus-within:border-[#ceff1c] transition-colors">
                       <input
                         type="text"
                         value={captchaInput}
                         onChange={(e) => setCaptchaInput(e.target.value.toUpperCase())}
-                        className="login-input w-full bg-transparent py-3 text-3xl md:text-4xl text-white outline-none placeholder:text-white/10"
+                        className="login-input w-full bg-transparent py-2 text-2xl md:text-3xl text-white outline-none placeholder:text-white/10"
                         placeholder="captcha"
                         style={{ fontFamily: "Aonic", color: 'white' }}
+                        autoCapitalize="characters"
                       />
                     </div>
-                    <div className="bg-white rounded p-1 h-[52px] flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    <div className="bg-white rounded p-1 h-[48px] flex-shrink-0 flex items-center justify-center overflow-hidden">
                       <img src={captchaImage} alt="CAPTCHA" className="h-full object-contain mix-blend-multiply" />
                     </div>
                   </div>

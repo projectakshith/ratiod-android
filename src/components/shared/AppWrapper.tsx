@@ -306,8 +306,8 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
       <div 
         className="flex-1 relative z-10 w-full"
         style={{
-          paddingTop: "env(safe-area-inset-top, 0px)",
-          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          paddingTop: "max(2.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem))",
+          paddingBottom: "max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem))",
           paddingLeft: "env(safe-area-inset-left, 0px)",
           paddingRight: "env(safe-area-inset-right, 0px)",
         }}

@@ -91,39 +91,30 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
     }
   };
 
-  /** Test and debug TinyOCR model prediction directly on current captcha */
-  const solveWithOcr = async (overrideImg?: string) => {
-    const img = overrideImg || captchaImage;
-    if (!img) return;
+  /** Ask the native login flow to solve this challenge without exposing its prediction. */
+  const solveWithOcr = async () => {
+    if (!captchaImage || !cdigest) return;
     setLoadingOcr(true);
-    setOcrStatus("running tinyocr...");
-    setError("");
+    setOcrStatus("trying on-device OCR login...");
     try {
-      const res = await fetchWithLoadBalancer("/captcha/solve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: img }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success && data.text) {
-        setCaptcha(data.text);
-        setOcrStatus(`predicted: "${data.text}"`);
-      } else {
-        const errMsg = data.error || data.detail || "OCR prediction failed";
-        setOcrStatus("ocr failed");
-        setError(`OCR: ${errMsg}`);
+      // OCR is performed inside /portal/login so the predicted answer stays native.
+      // If OCR is unavailable or uncertain, the normal challenge response updates
+      // the image and leaves the user able to enter the CAPTCHA manually.
+      const succeeded = await submitWithCaptcha("", cdigest, true);
+      if (!succeeded) {
+        setOcrStatus("enter CAPTCHA manually");
       }
     } catch (err: any) {
-      setOcrStatus("ocr failed");
-      setError(err.message || "Failed to reach TinyOCR solver");
+      setOcrStatus("ocr login failed");
+      setError(err.message || "On-device OCR login failed");
     } finally {
       setLoadingOcr(false);
     }
   };
 
-  const submitWithCaptcha = async (captchaVal: string, overrideCdigest?: string | null) => {
+  const submitWithCaptcha = async (captchaVal: string, overrideCdigest?: string | null, useOcr = false): Promise<boolean> => {
     const digest = overrideCdigest || cdigest;
-    if (!username || !password || !digest) return;
+    if (!username || !password || !digest) return false;
     setLoading(true);
     setError("");
     try {
@@ -133,7 +124,7 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
         body: JSON.stringify({
           username,
           password,
-          captcha: captchaVal,
+          ...(useOcr ? {} : { captcha: captchaVal }),
           cdigest: digest,
         }),
       });
@@ -167,7 +158,7 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
         } else {
           await fetchCaptcha(false);
         }
-        return;
+        return false;
       }
       if (data.cookies) {
         await EncryptionUtils.saveEncrypted("portal_cookies", data.cookies);
@@ -191,9 +182,11 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
       }
       onSuccess(data);
       onClose();
+      return true;
     } catch (err: any) {
       setError(err.message || "something broke, try again");
       await fetchCaptcha(false);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -344,7 +337,7 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
                       type="button"
                       onClick={() => solveWithOcr()}
                       disabled={loadingCaptcha || loadingOcr || !captchaImage}
-                      title="solve with tinyocr"
+                      title="try on-device OCR login"
                       className="h-[52px] px-3 shrink-0 rounded-2xl bg-theme-surface border border-theme-border flex items-center justify-center gap-1 text-theme-highlight hover:bg-theme-card hover:border-theme-highlight active:scale-95 transition-all disabled:opacity-40"
                     >
                       {loadingOcr ? (
@@ -353,7 +346,7 @@ export default function PortalLoginModal({ open, onClose, onSuccess, captchaOnly
                         <Zap size={13} className="text-theme-highlight fill-theme-highlight/20" />
                       )}
                       <span className="text-[9px] font-black uppercase tracking-wider hidden sm:inline" style={{ fontFamily: "var(--font-montserrat)" }}>
-                        ocr
+                        ocr login
                       </span>
                     </button>
                   </div>

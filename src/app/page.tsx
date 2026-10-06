@@ -11,20 +11,10 @@ export default function Page() {
     const hasSession = document.cookie.includes("ratio_session=");
     const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
     
-    if (hasSession && isOnboarded) {
-      router.replace("/dashboard");
+    if (hasSession) {
+      router.replace(isOnboarded ? "/dashboard" : "/onboarding");
     } else {
-      const isMobile = window.innerWidth < 768 || /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-      if (isMobile) {
-        if (isOnboarded) {
-          router.replace("/login");
-        } else {
-          router.replace("/onboarding");
-        }
-      } else {
-        setShowLanding(true);
-      }
-
+      router.replace("/login");
     }
   }, [router]);
 

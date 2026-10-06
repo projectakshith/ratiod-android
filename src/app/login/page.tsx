@@ -28,23 +28,21 @@ export default function LoginRoute() {
     localStorage.setItem("ratio_data", JSON.stringify(data));
     EncryptionUtils.setSessionCookie();
 
-    const isMobile = window.innerWidth < 768;
-    if (isMobile) {
-      const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
-      router.replace(isOnboarded ? "/dashboard" : "/onboarding");
+    const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
+    if (!isOnboarded) {
+      router.replace("/onboarding");
     } else {
-      localStorage.setItem("ratiod_onboarded", "true");
       router.replace("/dashboard");
     }
   };
 
   return (
-    <div data-theme="gojo" className="w-full h-screen bg-[#0c30ff] relative overflow-hidden">
+    <div data-theme="gojo" className="w-full min-h-full flex-1 bg-[#0c30ff] relative overflow-hidden flex flex-col">
       <motion.div
         initial={{ left: "0%" }}
         animate={{ left: "-100%" }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed top-0 w-full h-screen bg-[#ceff1c] z-[60] pointer-events-none"
+        className="fixed top-0 w-full h-full bg-[#ceff1c] z-[60] pointer-events-none"
       />
       <LoginPage onLogin={handleLoginSuccess} />
     </div>
