@@ -265,8 +265,7 @@ def run_parity(model: TinyCRNN, n_samples: int) -> bool:
     print(f"\n[real corpus n={len(subset)}]")
     print(f"  logit max_abs={d.max():.3e} mean_abs={d.mean():.3e}")
     print(f"  greedy agreement: {len(subset) - len(disagree)}/{len(subset)}")
-    for name, a, b_ in disagree[:10]:
-        print(f"    DISAGREE {name}: pytorch={a!r} onnx={b_!r}")
+    # Report counts only; even validation tools must not log predicted answers.
     ok &= len(disagree) == 0
 
     em = sum(r == p.stem.lower() for r, p in zip(refs, subset))

@@ -43,7 +43,8 @@ tasks.register('extractOnnxRuntime', Sync) {
 tasks.register('packageCoreAssets') {
     def model = new File(workspace, 'native/tinyocr/model/captcha_crnn.onnx')
     def vocab = new File(workspace, 'native/tinyocr/model/vocab.json')
-    inputs.files(model, vocab, new File(workspace, 'native/tinyocr/LICENSE'), new File(workspace, 'native/LICENSE-AGPL-3.0'))
+    inputs.files(model, vocab, new File(workspace, 'native/tinyocr/LICENSE'), new File(workspace, 'native/LICENSE-AGPL-3.0'),
+                 fileTree(new File(workspace, 'native/third-party/onnxruntime')))
     outputs.dir layout.buildDirectory.dir('generated/assets')
     doLast {
         if (sha256(model) != modelSha || sha256(vocab) != vocabSha) throw new GradleException('TinyOCR asset checksum mismatch')
@@ -51,6 +52,7 @@ tasks.register('packageCoreAssets') {
             from([model, vocab]) { into 'ratiod-core' }
             from(new File(workspace, 'native/tinyocr/LICENSE')) { into 'ratiod-core/licenses/tinyocr' }
             from(new File(workspace, 'native/LICENSE-AGPL-3.0')) { into 'ratiod-core/licenses/core' }
+            from(new File(workspace, 'native/third-party/onnxruntime')) { into 'ratiod-core/licenses/onnxruntime' }
             into layout.buildDirectory.dir('generated/assets')
         }
     }

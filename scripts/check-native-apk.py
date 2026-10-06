@@ -15,6 +15,7 @@ with zipfile.ZipFile(apk) as archive:
             name = f"lib/{abi}/{library}"
             data = archive.read(name)
             assert data[:6] == b"\x7fELF\x02\x01", f"Unexpected ELF format: {name}"
+            assert struct.unpack_from("<H", data, 18)[0] == {"arm64-v8a": 183, "x86_64": 62}[abi], f"Wrong machine ABI: {name}"
             phoff = struct.unpack_from("<Q", data, 32)[0]
             entry_size, count = struct.unpack_from("<HH", data, 54)
             loads = []
@@ -32,4 +33,6 @@ with zipfile.ZipFile(apk) as archive:
     assert "assets/public/index.html" in names, "Missing bundled Capacitor UI"
     assert "assets/ratiod-core/licenses/tinyocr/LICENSE" in names
     assert "assets/ratiod-core/licenses/core/LICENSE-AGPL-3.0" in names
+    assert "assets/ratiod-core/licenses/onnxruntime/LICENSE" in names
+    assert "assets/ratiod-core/licenses/onnxruntime/ThirdPartyNotices.txt" in names
 print("APK verified: ARM64/x86_64 Rust + OCR, 16 KB ELF segments, matching model assets, bundled UI.")
