@@ -52,6 +52,44 @@ public class PortalProbePlugin extends Plugin {
     public void load() {
         super.load();
         initHttpClient();
+        NativeCoreManager.getInstance().init(getContext());
+    }
+
+    @PluginMethod
+    public void isNativeReady(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("ready", NativeCoreManager.getInstance().isReady());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void nativeInvoke(PluginCall call) {
+        JSObject req = call.getObject("request");
+        String requestJson;
+        if (req != null) {
+            requestJson = req.toString();
+        } else {
+            requestJson = call.getString("requestJson", "{}");
+        }
+
+        NativeCoreManager.getInstance().invoke(requestJson, new NativeCoreManager.NativeCallback() {
+            @Override
+            public void onResult(String responseJson) {
+                try {
+                    JSObject ret = new JSObject(responseJson);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    JSObject ret = new JSObject();
+                    ret.put("rawResponse", responseJson);
+                    call.resolve(ret);
+                }
+            }
+
+            @Override
+            public void onError(Exception error) {
+                call.reject(error != null ? error.getMessage() : "Unknown native error");
+            }
+        });
     }
 
     private synchronized void initHttpClient() {
@@ -432,6 +470,7 @@ public class PortalProbePlugin extends Plugin {
     @PluginMethod
     public void clearSession(PluginCall call) {
         initHttpClient();
+        NativeCoreManager.getInstance().destroy();
         JSObject ret = new JSObject();
         ret.put("ok", true);
         call.resolve(ret);

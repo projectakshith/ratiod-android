@@ -10,10 +10,15 @@ def sha256 = { File f -> java.security.MessageDigest.getInstance('SHA-256').dige
 android {
     namespace 'com.ratiod.core'
     compileSdk rootProject.ext.compileSdkVersion
-    ndkVersion '28.2.13676358'
+    def ndkCheck = new File(android.sdkDirectory, 'ndk/28.2.13676358')
+    if (ndkCheck.exists()) {
+        ndkVersion '28.2.13676358'
+    }
     defaultConfig {
         minSdk rootProject.ext.minSdkVersion
-        ndk { abiFilters.addAll(abis) }
+        if (ndkCheck.exists()) {
+            ndk { abiFilters.addAll(abis) }
+        }
         consumerProguardFiles 'consumer-rules.pro'
     }
     sourceSets {
@@ -58,26 +63,42 @@ tasks.register('packageCoreAssets') {
     }
 }
 
+def hasCargo = false
+try {
+    def proc = "cargo --version".execute()
+    proc.waitFor()
+    hasCargo = proc.exitValue() == 0
+} catch (Exception ignored) {}
+
+def targetNdkDir = new File(android.sdkDirectory, 'ndk/28.2.13676358')
+def canBuildRust = targetNdkDir.exists() && hasCargo
+
 ['debug', 'release'].each { variant ->
-    def buildRust = tasks.register("buildRust${variant.capitalize()}", Exec) {
-        workingDir workspace
-        inputs.files(fileTree(new File(workspace, 'native')) {
-            include '**/*.rs', '**/Cargo.toml'
-            exclude '.cache/**', '**/tests/**'
-        }, new File(workspace, 'Cargo.toml'), new File(workspace, 'Cargo.lock'), new File(workspace, 'rust-toolchain.toml'))
-        outputs.dir layout.buildDirectory.dir("generated/rust/${variant}")
-        environment 'ANDROID_NDK_HOME', android.ndkDirectory.absolutePath
-        // Native libraries must support 16 KB devices, including the Rust ELF.
-        environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
-        environment 'CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
-        def args = ['cargo', 'ndk', '-t', 'arm64-v8a', '-t', 'x86_64', '--platform', '23',
-                    '-o', layout.buildDirectory.dir("generated/rust/${variant}").get().asFile.absolutePath,
-                    'build', '--locked', '-p', 'ratiod-jni']
-        if (variant == 'release') args.add('--release')
-        commandLine args
-    }
-    tasks.matching { it.name == "merge${variant.capitalize()}JniLibFolders" || it.name == "merge${variant.capitalize()}NativeLibs" }.configureEach {
-        dependsOn buildRust, tasks.named('extractOnnxRuntime')
+    if (canBuildRust) {
+        def buildRust = tasks.register("buildRust${variant.capitalize()}", Exec) {
+            workingDir workspace
+            inputs.files(fileTree(new File(workspace, 'native')) {
+                include '**/*.rs', '**/Cargo.toml'
+                exclude '.cache/**', '**/tests/**'
+            }, new File(workspace, 'Cargo.toml'), new File(workspace, 'Cargo.lock'), new File(workspace, 'rust-toolchain.toml'))
+            outputs.dir layout.buildDirectory.dir("generated/rust/${variant}")
+            environment 'ANDROID_NDK_HOME', targetNdkDir.absolutePath
+            // Native libraries must support 16 KB devices, including the Rust ELF.
+            environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
+            environment 'CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384'
+            def args = ['cargo', 'ndk', '-t', 'arm64-v8a', '-t', 'x86_64', '--platform', '23',
+                        '-o', layout.buildDirectory.dir("generated/rust/${variant}").get().asFile.absolutePath,
+                        'build', '--locked', '-p', 'ratiod-jni']
+            if (variant == 'release') args.add('--release')
+            commandLine args
+        }
+        tasks.matching { it.name == "merge${variant.capitalize()}JniLibFolders" || it.name == "merge${variant.capitalize()}NativeLibs" }.configureEach {
+            dependsOn buildRust, tasks.named('extractOnnxRuntime')
+        }
+    } else {
+        tasks.matching { it.name == "merge${variant.capitalize()}JniLibFolders" || it.name == "merge${variant.capitalize()}NativeLibs" }.configureEach {
+            dependsOn tasks.named('extractOnnxRuntime')
+        }
     }
 }
 tasks.named('preBuild') { dependsOn tasks.named('packageCoreAssets'), tasks.named('extractOnnxRuntime') }
