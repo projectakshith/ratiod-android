@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Ratio\'d Portal Probe</string>
-    <string name="title_activity_main">Ratio\'d Portal Probe</string>
+    <string name="app_name">Ratio\'d</string>
+    <string name="title_activity_main">Ratio\'d</string>
     <string name="package_name">com.ratiod.portalprobe</string>
     <string name="custom_url_scheme">com.ratiod.portalprobe</string>
 </resources>
