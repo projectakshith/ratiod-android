@@ -1,17 +1,19 @@
+<img width="1867" height="369" alt="ratio'd" src="https://github.com/user-attachments/assets/cf152291-6290-431a-bf97-448f42a21586" />
+
 <div align="center">
 
-### ratio'd for android
+### built for speed.
 
-> standalone android app for ratio'd. zero cloud servers, runs directly on your phone.
+> ratio'd is a dashboard built by students, for students. this is its standalone android app, with the same tools and themes, packaged for your phone.
 
 [![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
 [![Capacitor](https://img.shields.io/badge/Capacitor-119EFF?style=for-the-badge&logo=capacitor&logoColor=white)](https://capacitorjs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://typescriptlang.org)
 
-<img src="public/screenshots/mobile.jpeg" width="38%" />
+<img src="public/screenshots/mobile.jpeg" width="42%" />
 &nbsp;&nbsp;
-<img src="public/screenshots/attendance.jpeg" width="38%" />
+<img src="public/screenshots/attendance.jpeg" width="42%" />
 
 </div>
 
@@ -19,9 +21,9 @@
 
 ## what's this
 
-standalone native android app for ratio'd. unlike the web version which routed through cloudflare and backend proxies, this app talks directly to srm student portal and academia straight from your device using native okhttp clients.
+ratio'd for Android brings the SRM student dashboard to a standalone app. the interface and academic tools are bundled on your device, while native networking connects to SRM Academia and the Student Portal.
 
-no middleman servers. no credentials stored on our end. fully offline-first.
+Academia provides your profile and timetable. the Student Portal provides attendance and marks. account data stays on your device.
 
 ---
 
@@ -29,33 +31,34 @@ no middleman servers. no credentials stored on our end. fully offline-first.
 
 | feature | what it does |
 |---|---|
-| **zero backend** | connects straight from your device to srm portals with native okhttp |
-| **dual portal support** | works with both srm student portal and academia |
-| **ram-only Rust sessions** | the new Rust core keeps credentials and sessions in RAM; migration of legacy browser storage remains Agent 2's integration work |
-| **built-in updater** | in-app auto updates straight from github releases without play store |
-| **offline first** | ui and assets bundled directly into the apk |
-| **all ratio'd themes** | brutalist, minimalist, and custom palettes |
+| **student portal sync** | refreshes attendance and marks from the Student Portal |
+| **academia timetable** | loads your profile and timetable from Academia |
+| **offline first** | keeps the app interface and saved data available on your device |
+| **attendance predictor** | calculates how many classes you can miss while meeting your target |
+| **marks target** | estimates the marks needed to reach your target grade |
+| **class reminders** | schedules local notifications for upcoming classes |
+| **built-in updater** | downloads signed APK updates from GitHub Releases |
+| **ratio'd themes** | use the minimalist or brutalist interface |
 
 ---
 
 ## architecture
 
 ```
-phone
-  │
-  ├─▶ webview (ratio'd next.js ui)
-  │      │
-  │      ▼
-  ├─▶ capacitor bridge (backend proxy)
-  │      │
-  │      ▼
-  └─▶ native android plugin (okhttp)
-         │
-         ├──▶ sp.srmist.edu.in       (student portal)
-         └──▶ academia.srmist.edu.in (zoho academia)
+android app
+    │
+    ├──▶ bundled ratio'd interface
+    │       └── Next.js, React, Tailwind CSS
+    │
+    ├──▶ Capacitor native bridge
+    │       ├── portal networking and local session storage
+    │       ├── class reminder notifications
+    │       └── APK update and installation flow
+    │
+    ├──▶ SRM Academia       (profile and timetable)
+    ├──▶ SRM Student Portal (attendance and marks)
+    └──▶ GitHub Releases    (app updates)
 ```
-
-all network requests to srm are made directly from your phone's ip.
 
 ---
 
@@ -63,11 +66,12 @@ all network requests to srm are made directly from your phone's ip.
 
 | layer | tech |
 |---|---|
-| ui | Next.js 16, React, Tailwind CSS, Framer Motion |
+| frontend | Next.js, React, TypeScript, Tailwind CSS, Framer Motion |
 | native bridge | Capacitor 7 |
-| networking | OkHttp 4 |
-| platform | Android SDK 35 |
-| updates | GitHub Releases API + Android PackageInstaller |
+| android | Kotlin/Java, Android SDK, Gradle |
+| portal networking | native HTTP clients and Rust core |
+| notifications | Android local notifications |
+| updates | GitHub Releases and Android Package Installer |
 
 ---
 
@@ -75,14 +79,12 @@ all network requests to srm are made directly from your phone's ip.
 
 ```
 ratiod-android/
-├── src/                # ratio'd next.js app router & components
-├── public/             # assets, fonts, icons
-├── android/            # native android project
-│   └── app/src/main/
-│       ├── java/.../   # PortalProbePlugin, AppUpdaterPlugin, MainActivity
-│       └── res/        # launcher icons, xml configs, layouts
-├── capacitor.config.ts # capacitor config
-└── next.config.ts      # static export config
+├── src/                  # app pages, themes, components, and data logic
+├── public/               # bundled assets, fonts, and screenshots
+├── android/              # native Android app and Capacitor plugins
+├── native/               # Rust core and native libraries
+├── capacitor.config.ts   # Capacitor configuration
+└── next.config.ts         # static export configuration
 ```
 
 ---
@@ -102,65 +104,42 @@ cd ratiod-android
 npm install
 ```
 
-### 3. build web export
+### 3. build the app
 
 ```bash
 npm run build
 npx cap sync android
-```
-
-### 4. build apk
-
-```bash
 cd android
 ./gradlew assembleDebug
 ```
 
-the debug apk will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
-
-for release:
-
-```bash
-./gradlew assembleRelease
-```
+the debug APK is at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
-## On-device Rust core
+## releases
 
-The existing probe is preserved. The new `android/ratiod-native` module compiles
-and packages the Rust SRM core and local TinyOCR for ARM64 phones and x86_64
-emulators. Connecting the production Capacitor flows is Agent 2's next step.
+Android builds are published as signed APKs on [GitHub Releases](https://github.com/projectakshith/ratiod-android/releases). Install an APK and allow installs from the app you used to download it when Android prompts you.
 
-Read the [native bridge contract](docs/native-bridge-contract.md),
-[porting notes and native build prerequisites](docs/rust-core-porting-notes.md),
-and [Agent 2 handoff](docs/agent-2-handoff.md) before building or wiring the adapter.
+The in-app updater checks for releases after portal refresh, downloads the APK, and asks Android to install it. Android requires the user to confirm the installation.
+
+Tagged releases use the `vMAJOR.MINOR.PATCH` format. Pushing a version tag starts the GitHub Actions build and attaches the APK to the release. Release signing secrets must be configured in the repository to build an upgrade that installs over an existing release.
 
 ---
 
-## updates
+## contributing
 
-Android updates are distributed as APK assets on GitHub Releases. In the app, open
-**Settings → Check for Updates** to check the latest stable release, download it,
-and hand it to Android's package installer. Android asks the user to confirm the
-installation; the app cannot silently replace itself. If Android asks for
-permission to install apps, allow it, return to Ratio'd, and tap **Download &
-Install Update** again.
+this is a student project. if you find a bug or want to add something:
 
-To publish an update, push a `vMAJOR.MINOR.PATCH` tag (for example `v1.2.3`). The
-release workflow applies that version to `versionName` and generates an increasing
-`versionCode`, so the installed app recognizes the release and Android accepts it
-as an upgrade. Configure the repository secrets `KEYSTORE_BASE64`,
-`KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` with the same persistent
-release keystore for every tagged release. The workflow rejects a tagged release
-without those secrets because signing each update with a different key prevents
-Android from installing it over the existing app.
+1. fork it
+2. create a branch for your change
+3. open a pull request
 
 ---
 
 ## disclaimer
 
-ratio'd is not affiliated with SRM in any way. we don't own the portal, we don't store your data, we just make it less painful to look at. use it at your own risk, gng.
+ratio'd is not affiliated with SRM in any way. we don't own the portals. use it at your own risk, gng.
 
 ---
 
