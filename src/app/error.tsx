@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Terminal, ChevronDown, ChevronUp } from "lucide-react";
-import { ReactLenis } from "lenis/react";
 
 export default function Error({
   error,
@@ -19,7 +18,6 @@ export default function Error({
   }, [error]);
 
   return (
-    <ReactLenis root>
       <div className="min-h-screen w-full bg-theme-bg flex flex-col items-center py-12 px-6 text-center overflow-x-hidden relative selection:bg-theme-highlight selection:text-theme-bg">
         
         <div className="fixed inset-0 pointer-events-none z-0 opacity-20"
@@ -156,6 +154,5 @@ export default function Error({
           </div>
         </div>
       </div>
-    </ReactLenis>
   );
 }

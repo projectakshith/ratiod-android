@@ -8,7 +8,7 @@ export default function MinecraftAmbience() {
   const isSteve = theme?.includes("steve");
 
   const [bgIndex, setBgIndex] = useState(0);
-  const bgs = ["/mc_bg/mc_bg_1.gif", "/mc_bg/mc_bg_2.gif", "/mc_bg/mc_bg_3.gif"];
+  const bgs = ["/mc_bg/mc_bg_1.webp", "/mc_bg/mc_bg_2.gif", "/mc_bg/mc_bg_3.webp"];
 
   const [enderman, setEnderman] = useState<{ x: number; y: number } | null>(null);
   const [ghast, setGhast] = useState<{ x: number; y: number; dir: number } | null>(null);
@@ -120,7 +120,7 @@ export default function MinecraftAmbience() {
           >
             <div className="relative">
               <img
-                src="/enderman_idle.gif"
+            src="/enderman_idle.webp"
                 alt="Enderman"
                 className="h-56 w-auto object-contain"
                 style={{ imageRendering: "pixelated" }}

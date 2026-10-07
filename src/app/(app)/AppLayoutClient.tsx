@@ -1,15 +1,12 @@
 "use client";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import SettingsPage from "@/components/shared/SettingsPage";
 import { useApp } from "@/context/AppContext";
-import { useTheme } from "@/context/ThemeContext";
+import { useThemeUiStyle, useTheme } from "@/context/ThemeContext";
 import { useAcademiaData } from "@/hooks/useAcademiaData";
-import CommandPalette from "@/components/desktop/CommandPalette";
-import SmoothScroll from "@/components/desktop/SmoothScroll";
-import DesktopSidebar from "@/components/desktop/DesktopSidebar";
+import SettingsPage from "@/components/shared/SettingsPage";
 import FeedbackPopup from "@/components/shared/FeedbackPopup";
 import CommunityPopup from "@/components/shared/CommunityPopup";
 import TimetableFeatureModal from "@/components/shared/TimetableFeatureModal";
@@ -28,13 +25,53 @@ const MinimalistThemeLayout = dynamic(
 
 import { AppLayoutContext } from "@/context/AppLayoutContext";
 
+const SettingsOverlay = React.memo(function SettingsOverlay({
+  isOpen,
+  onClose,
+  onLogout,
+  profile,
+  onUpdateName,
+  onOpenHistory,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onLogout: () => void | Promise<void>;
+  profile: { name: string; regNo: string };
+  onUpdateName: (name: string) => void;
+  onOpenHistory: () => void;
+}) {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <SettingsPage
+          onBack={onClose}
+          onLogout={onLogout}
+          profile={profile}
+          onUpdateName={onUpdateName}
+          onSelectTheme={(newTheme) => {
+            setTheme(newTheme);
+            onClose();
+          }}
+          onOpenHistory={onOpenHistory}
+          currentTheme={theme}
+        />
+      )}
+    </AnimatePresence>
+  );
+});
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { userData, logout, customDisplayName, setCustomDisplayName, isUpdating, setIsUpdateHistoryOpen } = useApp();
-  const { theme, setTheme, uiStyle, isDark } = useTheme();
+  const uiStyle = useThemeUiStyle();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSwipeDisabled, setIsSwipeDisabled] = useState(false);
   const academia = useAcademiaData(userData as any);
   const router = useRouter();
+  const openSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setIsSettingsOpen(false), []);
+  const openUpdateHistory = useCallback(() => setIsUpdateHistoryOpen(true), [setIsUpdateHistoryOpen]);
 
   useEffect(() => {
     const hasSession = document.cookie.includes("ratio_session=");
@@ -48,35 +85,40 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
-  const handleUpdateName = (name: string) => {
+  const handleUpdateName = useCallback((name: string) => {
     setCustomDisplayName(name);
     localStorage.setItem("ratiod_custom_name", name);
-  };
+  }, [setCustomDisplayName]);
 
-  const sharedProps = {
+  const sharedProps = useMemo(() => ({
     data: userData as any,
     academia,
     onLogout: logout,
     customDisplayName,
     onUpdateName: handleUpdateName,
     startEntrance: true,
-    isDark,
-    onOpenSettings: () => setIsSettingsOpen(true),
+    onOpenSettings: openSettings,
     isUpdating,
     isSwipeDisabled
-  };
+  }), [userData, logout, customDisplayName, handleUpdateName, isUpdating, isSwipeDisabled, openSettings]);
+
+  const layoutContextValue = useMemo(() => ({
+    onOpenSettings: openSettings,
+    isSwipeDisabled,
+    setIsSwipeDisabled,
+  }), [openSettings, isSwipeDisabled]);
+  const settingsProfile = useMemo(() => ({
+    name: customDisplayName || userData?.profile?.name || "Student",
+    regNo: userData?.profile?.regNo || "",
+  }), [customDisplayName, userData?.profile?.name, userData?.profile?.regNo]);
 
   return (
-    <AppLayoutContext.Provider value={{ 
-      onOpenSettings: () => setIsSettingsOpen(true),
-      isSwipeDisabled,
-      setIsSwipeDisabled
-    }}>
+    <AppLayoutContext.Provider value={layoutContextValue}>
       <div className="fixed inset-0 bg-theme-bg overflow-hidden">
         <TimetableFeatureModal />
         <PortalFeatureModal />
         <ThemeFeatureModal />
-        <div className="md:hidden h-full w-full">
+        <div className="h-full w-full">
           {uiStyle === "brutalist" ? (
             <BrutalistThemeLayout {...sharedProps}>
               {children}
@@ -88,43 +130,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        <div 
-          className="hidden md:flex h-screen w-full flex-row overflow-hidden p-1.5 gap-1.5"
-          style={{ backgroundColor: 'color-mix(in srgb, var(--theme-bg), black 12%)' }}
-        >
-          <div className="flex-1 h-full bg-theme-bg rounded-[24px] overflow-hidden border border-theme-border shadow-2xl">
-            <SmoothScroll>
-                {children}
-            </SmoothScroll>
-          </div>
-          <CommandPalette />
-          <DesktopSidebar />
-        </div>
-
         <FeedbackPopup />
         <CommunityPopup />
 
-        <AnimatePresence>
-          {isSettingsOpen && (
-            <div className="md:hidden">
-              <SettingsPage
-                onBack={() => setIsSettingsOpen(false)}
-                onLogout={logout}
-                profile={{
-                  name: customDisplayName || userData?.profile?.name || "Student",
-                  regNo: userData?.profile?.regNo || "",
-                }}
-                onUpdateName={handleUpdateName}
-                onSelectTheme={(newTheme) => {
-                  setTheme(newTheme);
-                  setIsSettingsOpen(false);
-                }}
-                onOpenHistory={() => setIsUpdateHistoryOpen(true)}
-                currentTheme={theme}
-              />
-            </div>
-          )}
-        </AnimatePresence>
+        <SettingsOverlay
+          isOpen={isSettingsOpen}
+          onClose={closeSettings}
+          onLogout={logout}
+          profile={settingsProfile}
+          onUpdateName={handleUpdateName}
+          onOpenHistory={openUpdateHistory}
+        />
       </div>
     </AppLayoutContext.Provider>
   );

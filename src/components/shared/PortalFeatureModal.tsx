@@ -13,11 +13,23 @@ export default function PortalFeatureModal() {
       localStorage.setItem("ratiod_seen_portal_feature_v1", "true");
       return;
     }
-    const hasSeen = localStorage.getItem("ratiod_seen_portal_feature_v1");
-    if (!hasSeen) {
-      const t = setTimeout(() => setIsOpen(true), 1200);
-      return () => clearTimeout(t);
+    if (localStorage.getItem("ratiod_seen_portal_feature_v1")) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const show = (delay: number) => {
+      timer = setTimeout(() => setIsOpen(true), delay);
+    };
+    const onThemeFeatureDismissed = () => show(500);
+
+    if (localStorage.getItem("ratiod_seen_theme_feature_v9")) {
+      show(1200);
+    } else {
+      window.addEventListener("ratiod:theme-feature-dismissed", onThemeFeatureDismissed, { once: true });
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("ratiod:theme-feature-dismissed", onThemeFeatureDismissed);
+    };
   }, [userData?.isPortal]);
 
   if (userData?.isPortal) return null;

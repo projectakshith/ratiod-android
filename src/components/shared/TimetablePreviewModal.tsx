@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Download, X, Share2, Loader2 } from "lucide-react";
 import { toPng } from "html-to-image";
-import ExportTimetable from "@/components/desktop/timetable/ExportTimetable";
+import ExportTimetable from "@/components/shared/TimetableExportCanvas";
 
 interface TimetablePreviewModalProps {
   isOpen: boolean;

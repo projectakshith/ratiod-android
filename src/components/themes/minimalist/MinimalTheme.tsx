@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./Navbar";
 import { usePathname, useRouter } from "next/navigation";
@@ -12,7 +12,7 @@ interface MinimalThemeProps {
 
 const BEZIER = [0.34, 0.15, 0.16, 0.96] as const;
 
-export default function MinimalTheme({ children, isSwipeDisabled }: MinimalThemeProps) {
+function MinimalTheme({ children, isSwipeDisabled }: MinimalThemeProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isAlertsOpen] = useState(false);
@@ -26,51 +26,52 @@ export default function MinimalTheme({ children, isSwipeDisabled }: MinimalTheme
 
   const activeTab = getActiveTab();
 
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(
-    null,
-  );
-  const [isScrollingVertical, setIsScrollingVertical] = useState(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const isScrollingVertical = useRef(false);
+  const swipeTriggered = useRef(false);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (isSwipeDisabled) return;
-    setIsScrollingVertical(false);
-    setTouchStart({
+    isScrollingVertical.current = false;
+    swipeTriggered.current = false;
+    touchStart.current = {
       x: e.targetTouches[0].clientX,
       y: e.targetTouches[0].clientY,
-    });
+    };
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (isSwipeDisabled || !touchStart || isScrollingVertical) return;
+    const start = touchStart.current;
+    if (isSwipeDisabled || !start || isScrollingVertical.current || swipeTriggered.current) return;
 
     const touchX = e.targetTouches[0].clientX;
     const touchY = e.targetTouches[0].clientY;
 
-    const dx = Math.abs(touchX - touchStart.x);
-    const dy = Math.abs(touchY - touchStart.y);
+    const dx = Math.abs(touchX - start.x);
+    const dy = Math.abs(touchY - start.y);
 
     if (dy > dx && dy > 10) {
-      setIsScrollingVertical(true);
+      isScrollingVertical.current = true;
       return;
     }
 
     if (dx > 70) {
       const currentIndex = paths.indexOf(pathname);
-      if (touchX < touchStart.x && currentIndex < paths.length - 1) {
+      if (touchX < start.x && currentIndex < paths.length - 1) {
+        swipeTriggered.current = true;
         Haptics.heavy();
         router.push(paths[currentIndex + 1]);
-        setTouchStart(null);
-      } else if (touchX > touchStart.x && currentIndex > 0) {
+      } else if (touchX > start.x && currentIndex > 0) {
+        swipeTriggered.current = true;
         Haptics.heavy();
         router.push(paths[currentIndex - 1]);
-        setTouchStart(null);
       }
     }
   };
 
   const handleTouchEnd = () => {
-    setTouchStart(null);
-    setIsScrollingVertical(false);
+    touchStart.current = null;
+    isScrollingVertical.current = false;
   };
 
   const baseBg = "bg-theme-bg";
@@ -103,3 +104,5 @@ export default function MinimalTheme({ children, isSwipeDisabled }: MinimalTheme
     </div>
   );
 }
+
+export default React.memo(MinimalTheme);

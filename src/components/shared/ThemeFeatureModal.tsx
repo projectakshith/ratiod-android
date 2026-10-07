@@ -23,6 +23,7 @@ export default function ThemeFeatureModal() {
   const handleClose = () => {
     setIsOpen(false);
     localStorage.setItem("ratiod_seen_theme_feature_v9", "true");
+    window.dispatchEvent(new Event("ratiod:theme-feature-dismissed"));
   };
 
   const { colorTheme: activeColorTheme } = parseTheme(theme);
@@ -33,9 +34,7 @@ export default function ThemeFeatureModal() {
     setIsTransitioning(true);
     const newTheme = buildTheme("minimalist", colorId as any);
     setTheme(newTheme);
-    setTimeout(() => {
-      setIsTransitioning(false);
-    }, 320);
+    setTimeout(() => setIsTransitioning(false), 320);
   };
 
   const defaultPresets = useMemo(() => 
@@ -143,9 +142,9 @@ export default function ThemeFeatureModal() {
             />
 
             <motion.div
-              animate={{ 
+              animate={{
                 filter: isTransitioning ? "blur(8px)" : "blur(0px)",
-                opacity: isTransitioning ? 0.75 : 1 
+                opacity: isTransitioning ? 0.75 : 1,
               }}
               transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
               className="flex flex-col flex-1 min-h-0 overflow-hidden"

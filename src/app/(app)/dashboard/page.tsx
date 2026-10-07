@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import dynamic from "next/dynamic";
 import { useApp } from "@/context/AppContext";
-import { useTheme } from "@/context/ThemeContext";
+import { useThemeUiStyle } from "@/context/ThemeContext";
 
 const DashboardMinimalist = dynamic(
   () => import("@/components/themes/minimalist/dashboard/Dashboard"),
@@ -12,31 +12,16 @@ const DashboardBrutalist = dynamic(
   () => import("@/components/themes/brutalist/dashboard/Dashboard"),
   { loading: () => <div className="h-full w-full bg-theme-bg" /> }
 );
-const DesktopDashboard = dynamic(
-  () => import("@/components/desktop/dashboard/Dashboard"),
-  { loading: () => <div className="h-full w-full bg-theme-bg" /> }
-);
 
-import { useAcademiaData } from "@/hooks/useAcademiaData";
-import { useAppLayout } from "@/context/AppLayoutContext";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useAcademia, useAppLayout } from "@/context/AppLayoutContext";
+
 
 export default function DashboardPage() {
   const { userData, customDisplayName, isUpdating } = useApp();
-  const { uiStyle } = useTheme();
+  const uiStyle = useThemeUiStyle();
   const { onOpenSettings } = useAppLayout();
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
-  const academia = useAcademiaData(userData as any);
-  const isMobile = useIsMobile();
-
-  if (isMobile === undefined) {
-    return <div className="h-full w-full bg-theme-bg" />;
-  }
-
-  if (!isMobile) {
-    return <DesktopDashboard />;
-  }
-
+  const academia = useAcademia();
   if (uiStyle === "brutalist") {
     return (
       <DashboardBrutalist 

@@ -1,6 +1,5 @@
-"use client";
-import DesktopSettings from "@/components/desktop/settings/Settings";
+import { redirect } from "next/navigation";
 
 export default function SettingsPage() {
-  return <DesktopSettings />;
+  redirect("/dashboard");
 }

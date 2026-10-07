@@ -1,6 +1,6 @@
 "use client";
 import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
-import { migrateTheme, parseTheme } from "@/utils/theme/themeUtils";
+import { migrateTheme, parseTheme, type UiStyle } from "@/utils/theme/themeUtils";
 
 interface ThemeContextType {
   theme: string;
@@ -10,32 +10,28 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const UiStyleContext = createContext<UiStyle | undefined>(undefined);
+
+function syncThemeToSystem(theme: string) {
+  const { isDark } = parseTheme(theme);
+  document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+  const bgColor = getComputedStyle(document.documentElement)
+    .getPropertyValue("--theme-bg")
+    .trim();
+  if (!bgColor) return;
+
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "theme-color");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", bgColor);
+}
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<string>("minimalist_minimalist-dark");
   const [mounted, setMounted] = useState(false);
-
-  const updateSystemThemeColor = React.useCallback(() => {
-    const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-bg').trim();
-    if (bgColor) {
-      let meta = document.querySelector('meta[name="theme-color"]');
-      if (!meta) {
-        meta = document.createElement('meta');
-        meta.setAttribute('name', 'theme-color');
-        document.head.appendChild(meta);
-      }
-      meta.setAttribute('content', bgColor);
-      
-      const { isDark: parsedIsDark } = parseTheme(theme);
-      document.documentElement.style.colorScheme = parsedIsDark ? 'dark' : 'light';
-    }
-  }, [theme]);
-
-  useEffect(() => {
-    updateSystemThemeColor();
-    const timer = setTimeout(updateSystemThemeColor, 100);
-    return () => clearTimeout(timer);
-  }, [theme, updateSystemThemeColor]);
 
   useEffect(() => {
     try {
@@ -44,7 +40,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       setThemeState(migrated);
       const { colorTheme } = parseTheme(migrated);
       document.documentElement.setAttribute("data-theme", colorTheme);
-      updateSystemThemeColor();
+      syncThemeToSystem(migrated);
     } catch {
       document.documentElement.setAttribute("data-theme", "minimalist-dark");
     } finally {
@@ -57,7 +53,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeState(migrated);
     const { colorTheme } = parseTheme(migrated);
     document.documentElement.setAttribute("data-theme", colorTheme);
-    updateSystemThemeColor();
+    syncThemeToSystem(migrated);
     try {
       localStorage.setItem("ratiod_theme", migrated);
     } catch {
@@ -73,13 +69,23 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     isDark
   }), [theme, setTheme, uiStyle, isDark]);
 
+  const uiStyleValue = useMemo(() => uiStyle, [uiStyle]);
+
   if (!mounted) return <div className="h-[100dvh] w-full bg-[#111111]" />;
 
   return (
     <ThemeContext.Provider value={value}>
-      {children}
+      <UiStyleContext.Provider value={uiStyleValue}>
+        {children}
+      </UiStyleContext.Provider>
     </ThemeContext.Provider>
   );
+}
+
+export function useThemeUiStyle() {
+  const uiStyle = useContext(UiStyleContext);
+  if (uiStyle === undefined) throw new Error("useThemeUiStyle must be used within a ThemeProvider");
+  return uiStyle;
 }
 
 export function useTheme() {

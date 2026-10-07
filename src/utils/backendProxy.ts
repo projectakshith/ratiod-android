@@ -51,6 +51,18 @@ function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: 
 }
 
 async function handleNativeBridge(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  if (endpoint === "/api/announcements") {
+    const updater = (window as any).Capacitor?.Plugins?.AppUpdater;
+    if (!updater?.getAnnouncements) {
+      return jsonResponse({ detail: "Native announcements service is unavailable." }, 503);
+    }
+    try {
+      return jsonResponse(await updater.getAnnouncements());
+    } catch (e: any) {
+      return jsonResponse({ detail: e?.message || "Announcements could not be loaded." }, 502);
+    }
+  }
+
   const plugin = (window as any).Capacitor?.Plugins?.PortalProbe;
   if (!plugin) {
     throw new Error("Capacitor PortalProbe plugin not found");
@@ -508,10 +520,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
     }, 200);
   }
 
-  // 6. Announcements / Feedback
-  if (endpoint === "/api/announcements") {
-    return jsonResponse({ announcements: [] }, 200);
-  }
+  // 6. Feedback
 
   if (endpoint === "/feedback") {
     return jsonResponse({ success: true, message: "Feedback received locally" }, 200);

@@ -38,11 +38,34 @@ public class AppUpdaterPlugin extends Plugin {
     private static final String TAG = "AppUpdater";
     private static final String GITHUB_REPO = "projectakshith/ratiod-android";
     private static final String RELEASES_API = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest";
+    private static final String ANNOUNCEMENTS_API = "https://api.getratiod.lol/api/announcements";
 
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build();
+
+    @PluginMethod
+    public void getAnnouncements(PluginCall call) {
+        new Thread(() -> {
+            Request request = new Request.Builder()
+                    .url(ANNOUNCEMENTS_API)
+                    .header("User-Agent", "RatioD-Android-App")
+                    .header("Accept", "application/json")
+                    .build();
+            try (Response response = client.newCall(request).execute()) {
+                ResponseBody body = response.body();
+                if (!response.isSuccessful() || body == null) {
+                    call.reject("Announcements could not be loaded (HTTP " + response.code() + ").");
+                    return;
+                }
+                call.resolve(new JSObject(body.string()));
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to load announcements: " + e.getMessage(), e);
+                call.reject("Announcements could not be loaded. Check your connection and try again.");
+            }
+        }).start();
+    }
 
     @PluginMethod
     public void checkUpdate(PluginCall call) {
