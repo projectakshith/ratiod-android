@@ -6,15 +6,18 @@ import { Download, RefreshCw, CheckCircle2, AlertCircle, X } from "lucide-react"
 interface NativeUpdateModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialUpdate?: any;
+  alreadyDownloaded?: boolean;
 }
 
-export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModalProps) {
+export default function NativeUpdateModal({ isOpen, onClose, initialUpdate, alreadyDownloaded = false }: NativeUpdateModalProps) {
   const [checking, setChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState(alreadyDownloaded);
 
   const getUpdater = () => {
     return (typeof window !== "undefined" && (window as any).Capacitor?.Plugins?.AppUpdater) || null;
@@ -39,6 +42,8 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
         setError(res.message || "GitHub releases are not publicly accessible to this app.");
       } else if (!res.updateAvailable) {
         setStatusMsg(res.message || `You're on the latest version (${res.currentVersion || "v1.0.0"}).`);
+      } else {
+        void downloadInBackground(res);
       }
     } catch (e: any) {
       setError(e.message || "Failed to check GitHub releases.");
@@ -49,11 +54,38 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
 
   useEffect(() => {
     if (isOpen) {
-      handleCheck();
+      if (initialUpdate) {
+        setUpdateInfo(initialUpdate);
+        setDownloaded(alreadyDownloaded);
+        if (!alreadyDownloaded) void downloadInBackground(initialUpdate);
+      } else {
+        handleCheck();
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialUpdate]);
 
-  const handleDownloadAndInstall = async () => {
+  const downloadInBackground = async (info: any) => {
+    const updater = getUpdater();
+    if (!updater || !info?.apkUrl) return;
+    setDownloading(true);
+    setError(null);
+    let listener: any = null;
+    try {
+      listener = await updater.addListener("downloadProgress", (data: any) => {
+        if (typeof data.percent === "number") setProgress(data.percent);
+      });
+      await updater.downloadUpdate({ apkUrl: info.apkUrl });
+      setDownloaded(true);
+      setStatusMsg("Update downloaded. Install when you’re ready.");
+    } catch (e: any) {
+      setError(e.message || "Update download failed.");
+    } finally {
+      setDownloading(false);
+      if (listener?.remove) listener.remove();
+    }
+  };
+
+  const handleInstall = async () => {
     const updater = getUpdater();
     if (!updater || !updateInfo?.apkUrl) return;
 
@@ -69,28 +101,12 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
       return;
     }
 
-    setDownloading(true);
-    setProgress(0);
     setError(null);
-
-    // Listen for download progress events
-    let listener: any = null;
     try {
-      listener = await updater.addListener("downloadProgress", (data: any) => {
-        if (typeof data.percent === "number") {
-          setProgress(data.percent);
-        }
-      });
-
-      await updater.downloadAndInstall({ apkUrl: updateInfo.apkUrl });
+      await updater.installDownloadedUpdate();
       setStatusMsg("Installer launched. Please confirm the update on your device.");
     } catch (e: any) {
-      setError(e.message || "Download failed. Please check your network.");
-    } finally {
-      setDownloading(false);
-      if (listener && typeof listener.remove === "function") {
-        listener.remove();
-      }
+      setError(e.message || "Could not open Android installer.");
     }
   };
 
@@ -156,11 +172,11 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
                   </div>
                 ) : (
                   <button
-                    onClick={handleDownloadAndInstall}
+                    onClick={downloaded ? handleInstall : () => downloadInBackground(updateInfo)}
                     className="w-full py-3 px-4 bg-theme-highlight hover:opacity-90 active:scale-[0.98] text-theme-text font-bold uppercase tracking-wider text-xs rounded-2xl flex items-center justify-center gap-2 transition-all"
                   >
                     <Download size={16} />
-                    Download &amp; Install Update
+                    {downloaded ? "Install Update" : "Download Update"}
                   </button>
                 )}
                 {statusMsg && <p className="text-xs text-theme-muted">{statusMsg}</p>}

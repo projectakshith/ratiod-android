@@ -8,6 +8,7 @@ import MinecraftAmbience from "./MinecraftAmbience";
 import SyncStatusNotification from "./SyncStatusNotification";
 import UpdateHistory from "./UpdateHistory";
 import PortalLoginModal from "./PortalLoginModal";
+import NativeUpdateModal from "./NativeUpdateModal";
 import AnnouncementToast from "./AnnouncementToast";
 import { useTabFocus } from "@/hooks/useTabFocus";
 
@@ -21,6 +22,38 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
   const wasUpdating = React.useRef(false);
   const [showWifiPopup, setShowWifiPopup] = useState(false);
   const prevOffline = React.useRef(isOffline);
+  const [nativeUpdatePrompt, setNativeUpdatePrompt] = useState<{ info: any; downloaded: boolean } | null>(null);
+
+  useEffect(() => {
+    const updater = (window as any).Capacitor?.Plugins?.AppUpdater;
+    if (!updater) return;
+    let checking = false;
+    const checkAndStage = async () => {
+      if (checking || document.visibilityState === "hidden") return;
+      const lastCheck = Number(localStorage.getItem("ratiod_native_update_check") || 0);
+      if (Date.now() - lastCheck < 6 * 60 * 60 * 1000) return;
+      checking = true;
+      localStorage.setItem("ratiod_native_update_check", String(Date.now()));
+      try {
+        const info = await updater.checkUpdate();
+        if (!info?.updateAvailable || !info?.apkUrl) return;
+        try {
+          await updater.downloadUpdate({ apkUrl: info.apkUrl });
+          setNativeUpdatePrompt({ info, downloaded: true });
+        } catch {
+          setNativeUpdatePrompt({ info, downloaded: false });
+        }
+      } catch {
+        // Keep automatic checks quiet; Settings still offers a manual check.
+      } finally {
+        checking = false;
+      }
+    };
+    void checkAndStage();
+    const onResume = () => { if (document.visibilityState === "visible") void checkAndStage(); };
+    document.addEventListener("visibilitychange", onResume);
+    return () => document.removeEventListener("visibilitychange", onResume);
+  }, []);
 
   useEffect(() => {
     if (isOffline && !prevOffline.current) {
@@ -324,6 +357,12 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
         onClose={() => setPortalAuthOpen(false)}
         onSuccess={() => {}}
         captchaOnly={portalAuthMode === "captcha_only"}
+      />
+      <NativeUpdateModal
+        isOpen={!!nativeUpdatePrompt}
+        initialUpdate={nativeUpdatePrompt?.info}
+        alreadyDownloaded={nativeUpdatePrompt?.downloaded}
+        onClose={() => setNativeUpdatePrompt(null)}
       />
 
       <AnimatePresence>

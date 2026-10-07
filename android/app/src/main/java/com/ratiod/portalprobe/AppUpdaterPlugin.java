@@ -208,8 +208,14 @@ public class AppUpdaterPlugin extends Plugin {
         }
     }
 
+    private File stagedApk() {
+        File cacheDir = getContext().getExternalCacheDir();
+        if (cacheDir == null) cacheDir = getContext().getCacheDir();
+        return new File(cacheDir, "ratiod-update.apk");
+    }
+
     @PluginMethod
-    public void downloadAndInstall(PluginCall call) {
+    public void downloadUpdate(PluginCall call) {
         String apkUrl = call.getString("apkUrl");
         if (apkUrl == null || apkUrl.isEmpty()) {
             call.reject("apkUrl is required");
@@ -222,23 +228,12 @@ public class AppUpdaterPlugin extends Plugin {
             call.reject("Update APK must come from GitHub over HTTPS");
             return;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                !getContext().getPackageManager().canRequestPackageInstalls()) {
-            call.reject("Allow Ratio'd to install apps in Android settings, then tap Install again.");
-            return;
-        }
-
         new Thread(() -> {
             try {
                 Context context = getContext();
-                File cacheDir = context.getExternalCacheDir();
-                if (cacheDir == null) {
-                    cacheDir = context.getCacheDir();
-                }
-                File apkFile = new File(cacheDir, "ratiod-update.apk");
-                if (apkFile.exists()) {
-                    apkFile.delete();
-                }
+                File apkFile = stagedApk();
+                File tempFile = new File(apkFile.getParentFile(), "ratiod-update.apk.part");
+                if (tempFile.exists()) tempFile.delete();
 
                 Request request = new Request.Builder()
                         .url(apkUrl)
@@ -261,7 +256,7 @@ public class AppUpdaterPlugin extends Plugin {
                     long downloadedBytes = 0;
 
                     try (InputStream is = body.byteStream();
-                         FileOutputStream fos = new FileOutputStream(apkFile)) {
+                         FileOutputStream fos = new FileOutputStream(tempFile)) {
                         byte[] buffer = new byte[8192];
                         int read;
                         long lastNotify = 0;
@@ -291,38 +286,56 @@ public class AppUpdaterPlugin extends Plugin {
                     doneProgress.put("percent", 100);
                     notifyListeners("downloadProgress", doneProgress);
 
-                    // Permissions may have changed during the download. Never
-                    // launch Package Installer until Android confirms access.
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                            !context.getPackageManager().canRequestPackageInstalls()) {
-                        call.reject("Allow Ratio'd to install apps in Android settings, then tap Install again.");
+                    if (downloadedBytes == 0 || (totalBytes > 0 && downloadedBytes != totalBytes)) {
+                        tempFile.delete();
+                        call.reject("The update download was incomplete.");
+                        return;
+                    }
+                    if (apkFile.exists()) apkFile.delete();
+                    if (!tempFile.renameTo(apkFile)) {
+                        tempFile.delete();
+                        call.reject("Could not save the downloaded update.");
                         return;
                     }
 
-                    // Launch Package Installer
-                    Uri contentUri = FileProvider.getUriForFile(
-                            context,
-                            context.getPackageName() + ".fileprovider",
-                            apkFile
-                    );
-
-                    Intent installIntent = new Intent(Intent.ACTION_VIEW);
-                    installIntent.setDataAndType(contentUri, "application/vnd.android.package-archive");
-                    installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-                    context.startActivity(installIntent);
-
                     JSObject ret = new JSObject();
                     ret.put("ok", true);
-                    ret.put("startedInstall", true);
+                    ret.put("prepared", true);
                     call.resolve(ret);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Error downloading and installing APK: " + e.getMessage(), e);
-                call.reject("Failed to download or install update: " + e.getMessage());
+                Log.e(TAG, "Error downloading APK: " + e.getMessage(), e);
+                call.reject("Failed to download update: " + e.getMessage());
             }
         }).start();
+    }
+
+    @PluginMethod
+    public void installDownloadedUpdate(PluginCall call) {
+        Context context = getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !context.getPackageManager().canRequestPackageInstalls()) {
+            call.reject("Allow Ratio'd to install apps in Android settings, then tap Install again.");
+            return;
+        }
+        File apkFile = stagedApk();
+        if (!apkFile.isFile() || apkFile.length() == 0) {
+            call.reject("The update has not finished downloading. Check again in a moment.");
+            return;
+        }
+        try {
+            Uri contentUri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileprovider", apkFile);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(contentUri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("startedInstall", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Could not open Android's installer: " + e.getMessage());
+        }
     }
 
     @PluginMethod
