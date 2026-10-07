@@ -151,7 +151,10 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           }
           return jsonResponse({
             success: false,
-            detail: err.message || "Portal login failed"
+            detail: {
+              type: err.code || "PORTAL_LOGIN_FAILED",
+              message: err.message || "Student Portal login failed.",
+            }
           }, 401);
         }
       } catch (e: any) {

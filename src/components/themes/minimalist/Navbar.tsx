@@ -16,7 +16,7 @@ export default function Navbar() {
 
   return (
     <nav
-      className="px-6 pt-5 flex justify-between items-center bg-theme-bg border-t border-theme-border"
+      className="px-5 pt-4 flex justify-between items-center bg-theme-bg border-t border-theme-border"
       style={{ paddingBottom: "max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem))" }}
     >
       {tabs.map((tab) => {
@@ -28,7 +28,7 @@ export default function Navbar() {
             onClick={() => {
               Haptics.light();
             }}
-            className={`text-[10px] font-bold uppercase tracking-[0.15em] transition-colors duration-300 ${
+            className={`min-h-9 px-2 flex items-center justify-center text-[11px] font-bold uppercase tracking-[0.15em] transition-colors duration-300 ${
               isActive ? "text-theme-text" : "text-theme-subtle"
             }`}
             style={{ fontFamily: "'Montserrat', sans-serif" }}

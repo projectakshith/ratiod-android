@@ -131,7 +131,7 @@ impl Portal {
         {
             return initial;
         }
-        for _ in 0..4 {
+        for attempt in 0..4 {
             let challenge = self
                 .challenge
                 .as_mut()
@@ -140,17 +140,21 @@ impl Portal {
                 return initial;
             };
             challenge.public.ocr_status = OcrStatus::Available;
-            let prediction = match solver.predict(&challenge.bytes) {
+            let prediction = solver.predict(&challenge.bytes);
+            let prediction = match prediction {
                 Ok(p) if p.score >= 0.90 && !p.text.is_empty() => p,
-                Ok(_) => {
-                    challenge.public.ocr_status = OcrStatus::Uncertain;
-                    return Err(CoreError::new(ErrorCode::CaptchaRequired)
-                        .with_challenge(challenge.public.clone()));
-                }
-                Err(_) => {
-                    challenge.public.ocr_status = OcrStatus::Unavailable;
-                    return Err(CoreError::new(ErrorCode::CaptchaRequired)
-                        .with_challenge(challenge.public.clone()));
+                other => {
+                    let status = match other {
+                        Ok(_) => OcrStatus::Uncertain,
+                        Err(_) => OcrStatus::Unavailable,
+                    };
+                    let challenge = self.challenge.as_mut().unwrap();
+                    challenge.public.ocr_status = status;
+                    let public = challenge.public.clone();
+                    if attempt < 3 && self.load_captcha().is_ok() {
+                        continue;
+                    }
+                    return Err(CoreError::new(ErrorCode::CaptchaRequired).with_challenge(public));
                 }
             };
             let text = Zeroizing::new(prediction.text);
@@ -385,18 +389,38 @@ fn rejection(html: &str) -> Option<CoreError> {
         .select(&parsers::select(".alert-icon-content, .alert-danger"))
         .next()?;
     let message = parsers::text(alert).to_lowercase();
+    let credential_failure = [
+        "invalid credentials",
+        "invalid login",
+        "invalid password",
+        "wrong password",
+        "incorrect password",
+        "password is incorrect",
+        "user id or password",
+        "user id/password",
+        "user id and password",
+        "username or password",
+        "username/password",
+        "username and password",
+        "invalid username",
+        "attempts remaining",
+        "unsuccessful",
+    ]
+    .iter()
+    .any(|phrase| message.contains(phrase))
+        || (message.contains("password")
+            && [
+                "invalid",
+                "wrong",
+                "incorrect",
+                "does not match",
+                "did not match",
+            ]
+            .iter()
+            .any(|phrase| message.contains(phrase)));
     let code = if message.contains("locked") {
         ErrorCode::AccountLocked
-    } else if message.contains("invalid credentials")
-        || message.contains("invalid login")
-        || message.contains("invalid password")
-        || message.contains("wrong password")
-        || message.contains("incorrect password")
-        || message.contains("user id or password")
-        || message.contains("username or password")
-        || message.contains("attempts remaining")
-        || message.contains("unsuccessful")
-    {
+    } else if credential_failure {
         ErrorCode::InvalidCredentials
     } else if message.contains("invalid captcha")
         || message.contains("captcha is incorrect")
