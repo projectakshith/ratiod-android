@@ -13,7 +13,8 @@ const DashboardBrutalist = dynamic(
   { loading: () => <div className="h-full w-full bg-theme-bg" /> }
 );
 
-import { useAcademia, useAppLayout } from "@/context/AppLayoutContext";
+import { useAcademiaData } from "@/hooks/useAcademiaData";
+import { useAppLayout } from "@/context/AppLayoutContext";
 
 
 export default function DashboardPage() {
@@ -21,7 +22,7 @@ export default function DashboardPage() {
   const uiStyle = useThemeUiStyle();
   const { onOpenSettings } = useAppLayout();
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
-  const academia = useAcademia();
+  const academia = useAcademiaData(userData as any);
   if (uiStyle === "brutalist") {
     return (
       <DashboardBrutalist 

@@ -3,7 +3,7 @@ import React from "react";
 import dynamic from "next/dynamic";
 import { useApp } from "@/context/AppContext";
 import { useThemeUiStyle } from "@/context/ThemeContext";
-import { useAcademia } from "@/context/AppLayoutContext";
+import { useAcademiaData } from "@/hooks/useAcademiaData";
 
 const TimetableMinimalist = dynamic(
   () => import("@/components/themes/minimalist/timetable/Timetable"),
@@ -17,7 +17,7 @@ const TimetableBrutalist = dynamic(
 export default function TimetablePage() {
   const { userData } = useApp();
   const uiStyle = useThemeUiStyle();
-  const academia = useAcademia();
+  const academia = useAcademiaData(userData as any);
   if (uiStyle === "brutalist") {
     return (
       <TimetableBrutalist 
