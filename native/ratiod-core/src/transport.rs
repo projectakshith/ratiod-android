@@ -6,9 +6,10 @@ use crate::{
 use reqwest::{
     Url,
     blocking::{Client, Response},
+    cookie::{CookieStore, Jar},
     redirect::Policy,
 };
-use std::{error::Error, io::Read, time::Duration};
+use std::{collections::HashMap, error::Error, io::Read, sync::Arc, time::Duration};
 
 pub const PORTAL_BASE: &str = "https://sp.srmist.edu.in/srmiststudentportal";
 pub const PORTAL_LOGIN: &str =
@@ -30,6 +31,7 @@ pub fn allowed(url: &Url, service: Service) -> bool {
 
 pub struct Transport {
     client: Client,
+    cookie_jar: Arc<Jar>,
     service: Service,
     // Test-only origin substitution; production never accepts configurable SRM URLs.
     #[cfg(test)]
@@ -38,10 +40,11 @@ pub struct Transport {
 
 impl Transport {
     pub fn new(service: Service) -> Result<Self> {
+        let cookie_jar = Arc::new(Jar::default());
         let client = Client::builder()
             // Standard Mozilla trust anchors avoid a Java callback dependency in Rust TLS.
             .tls_certs_only(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().filter_map(|cert| reqwest::Certificate::from_der(cert.as_ref()).ok()))
-            .cookie_store(true)
+            .cookie_provider(cookie_jar.clone())
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(30))
             .https_only(true)
@@ -52,6 +55,7 @@ impl Transport {
             .build().map_err(map_error)?;
         Ok(Self {
             client,
+            cookie_jar,
             service,
             #[cfg(test)]
             test_base: None,
@@ -59,15 +63,65 @@ impl Transport {
     }
     #[cfg(test)]
     pub fn for_test(service: Service, base: String) -> Self {
+        let cookie_jar = Arc::new(Jar::default());
         Self {
             client: Client::builder()
-                .cookie_store(true)
+                .cookie_provider(cookie_jar.clone())
                 .redirect(Policy::none())
                 .build()
                 .unwrap(),
+            cookie_jar,
             service,
             test_base: Some(base),
         }
+    }
+    pub fn with_cookies(service: Service, cookies: &HashMap<String, String>) -> Result<Self> {
+        let transport = Self::new(service)?;
+        let origin = Url::parse(match service {
+            Service::Academia => ACADEMIA_BASE,
+            Service::Portal => PORTAL_LOGIN,
+        })
+        .map_err(|_| CoreError::new(ErrorCode::InternalError))?;
+        for (name, value) in cookies {
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c))
+                || value.chars().any(|c| matches!(c, '\r' | '\n' | ';'))
+            {
+                continue;
+            }
+            transport.cookie_jar.add_cookie_str(
+                &format!(
+                    "{name}={value}; Domain={}; Path=/",
+                    origin.host_str().unwrap_or_default()
+                ),
+                &origin,
+            );
+        }
+        Ok(transport)
+    }
+    pub fn cookies(&self) -> HashMap<String, String> {
+        let origin = match self.service {
+            Service::Academia => Url::parse(ACADEMIA_BASE),
+            Service::Portal => Url::parse(PORTAL_LOGIN),
+        };
+        let Ok(origin) = origin else {
+            return HashMap::new();
+        };
+        self.cookie_jar
+            .cookies(&origin)
+            .and_then(|value| value.to_str().ok().map(str::to_owned))
+            .map(|header| {
+                header
+                    .split(';')
+                    .filter_map(|pair| {
+                        let (name, value) = pair.trim().split_once('=')?;
+                        Some((name.trim().to_owned(), value.trim().to_owned()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
     pub fn fresh(&self) -> Result<Self> {
         #[cfg(test)]

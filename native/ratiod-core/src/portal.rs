@@ -9,7 +9,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use regex::Regex;
 use scraper::Html;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     time::{SystemTime, UNIX_EPOCH},
 };
 use zeroize::Zeroizing;
@@ -160,13 +160,12 @@ impl Portal {
                 Err(e) => return Err(e),
             }
         }
-        Err(CoreError::new(ErrorCode::CaptchaRejected).with_challenge(
-            self.challenge
-                .as_ref()
-                .ok_or_else(|| CoreError::new(ErrorCode::InternalError))?
-                .public
-                .clone(),
-        ))
+        let challenge = self
+            .challenge
+            .as_mut()
+            .ok_or_else(|| CoreError::new(ErrorCode::InternalError))?;
+        challenge.public.ocr_status = OcrStatus::Uncertain;
+        Err(CoreError::new(ErrorCode::CaptchaRejected).with_challenge(challenge.public.clone()))
     }
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -175,6 +174,13 @@ impl Portal {
             challenge: None,
             authenticated: false,
         })
+    }
+    pub fn restore_cookies(&mut self, cookies: &HashMap<String, String>) -> Result<()> {
+        self.http = Transport::with_cookies(Service::Portal, cookies)?;
+        self.credentials = None;
+        self.challenge = None;
+        self.authenticated = true;
+        Ok(())
     }
     pub fn load_captcha(&mut self) -> Result<Challenge> {
         self.http = self.http.fresh()?;
@@ -379,10 +385,29 @@ fn rejection(html: &str) -> Option<CoreError> {
         .select(&parsers::select(".alert-icon-content, .alert-danger"))
         .next()?;
     let message = parsers::text(alert).to_lowercase();
-    let code = if message.contains("captcha") {
-        ErrorCode::CaptchaRejected
-    } else if message.contains("locked") {
+    let code = if message.contains("locked") {
         ErrorCode::AccountLocked
+    } else if message.contains("invalid credentials")
+        || message.contains("invalid login")
+        || message.contains("invalid password")
+        || message.contains("wrong password")
+        || message.contains("incorrect password")
+        || message.contains("user id or password")
+        || message.contains("username or password")
+        || message.contains("attempts remaining")
+        || message.contains("unsuccessful")
+    {
+        ErrorCode::InvalidCredentials
+    } else if message.contains("invalid captcha")
+        || message.contains("captcha is incorrect")
+        || message.contains("incorrect captcha")
+        || message.contains("wrong captcha")
+        || message.contains("captcha mismatch")
+        || message.contains("captcha does not match")
+        || message.contains("captcha didn't match")
+        || message.contains("captcha")
+    {
+        ErrorCode::CaptchaRejected
     } else if message.contains("invalid")
         || message.contains("credential")
         || message.contains("unsuccessful")

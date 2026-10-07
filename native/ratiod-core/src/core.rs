@@ -136,7 +136,15 @@ impl Core {
                 Service::Portal => self.portal.timetable(),
                 Service::Academia => self.academia.timetable(),
             }?),
-            Request::Refresh { service } => self.refresh(service),
+            Request::Refresh { service, cookies } => {
+                if service == Service::Portal
+                    && !self.portal.authenticated
+                    && let Some(cookies) = cookies.as_ref().filter(|cookies| !cookies.is_empty())
+                {
+                    self.portal.restore_cookies(cookies)?;
+                }
+                self.refresh(service)
+            }
         }
     }
     fn invalidate_authentication(&mut self, service: Service) {
@@ -172,7 +180,8 @@ impl Core {
     fn refresh(&mut self, service: Service) -> Result<Value> {
         if service == Service::Academia {
             let mut timetable = self.academia.timetable();
-            if matches!(&timetable, Err(e) if matches!(e.code, ErrorCode::SessionExpired | ErrorCode::SessionConflict)) {
+            if matches!(&timetable, Err(e) if matches!(e.code, ErrorCode::SessionExpired | ErrorCode::SessionConflict))
+            {
                 self.reauthenticate(service)?;
                 timetable = self.academia.timetable();
             }
@@ -224,9 +233,11 @@ impl Core {
         {
             self.invalidate_authentication(service);
         }
-        Ok(json!({"service":service,"sections":{
-            "attendance":section(Ok(attendance)),"profile":section(profile),"marks":section(marks.map(|m|json!({"marks":m}))),"timetable":section(timetable)
-        }}))
+        Ok(
+            json!({"service":service,"cookies":self.portal.http.cookies(),"sections":{
+                "attendance":section(Ok(attendance)),"profile":section(profile),"marks":section(marks.map(|m|json!({"marks":m}))),"timetable":section(timetable)
+            }}),
+        )
     }
 }
 fn session_error(error: &CoreError) -> bool {

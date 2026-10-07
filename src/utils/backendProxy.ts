@@ -115,7 +115,10 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           const refreshRes = await plugin.nativeInvoke({
             request: { apiVersion: 1, service: "portal", method: "refresh" }
           });
-          const merged = extractRefreshSections(refreshRes.data?.sections, true, creds.username);
+          const merged = {
+            ...extractRefreshSections(refreshRes.data?.sections, true, creds.username),
+            cookies: refreshRes.data?.cookies || {},
+          };
           return jsonResponse(merged);
         } else {
           const err = loginRes.error || {};
@@ -226,7 +229,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       try {
         const payload = JSON.parse((options.body as string) || "{}");
         let refreshRes = await plugin.nativeInvoke({
-          request: { apiVersion: 1, service: "portal", method: "refresh" }
+          request: { apiVersion: 1, service: "portal", method: "refresh", cookies: payload.cookies || undefined }
         });
         if (!refreshRes.ok && refreshRes.error?.code === "SESSION_EXPIRED" && payload.username && payload.password) {
           const loginRes = await plugin.nativeInvoke({
@@ -241,11 +244,14 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           });
           if (!loginRes.ok) return nativeErrorResponse(loginRes.error, "Student Portal sign-in is required");
           refreshRes = await plugin.nativeInvoke({
-            request: { apiVersion: 1, service: "portal", method: "refresh" }
+            request: { apiVersion: 1, service: "portal", method: "refresh", cookies: payload.cookies || undefined }
           });
         }
         if (refreshRes.ok) {
-          const merged = extractRefreshSections(refreshRes.data?.sections, true, payload.username);
+          const merged = {
+            ...extractRefreshSections(refreshRes.data?.sections, true, payload.username),
+            cookies: refreshRes.data?.cookies || {},
+          };
           return jsonResponse(merged);
         }
         return nativeErrorResponse(refreshRes.error);

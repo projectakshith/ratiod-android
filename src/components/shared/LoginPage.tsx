@@ -32,6 +32,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
   const [randomDelimiter, setRandomDelimiter] = useState<string>("0000");
 
   const [isExiting, setIsExiting] = useState(false);
+  const showCaptchaChallenge = Boolean(
+    captchaImage && (loginMode !== "portal" || ocrStatus !== "available" || captchaInput.trim()),
+  );
 
   const formatUsername = (val: string) => {
     const cleanVal = val.trim();
@@ -109,6 +112,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           setCaptchaImage(err.image || err.captcha_image);
           setCdigest(err.cdigest || err.session);
           if (err.ocrStatus) setOcrStatus(err.ocrStatus);
+          else if (err.type === "WRONG_CAPTCHA") setOcrStatus("uncertain");
           if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
           if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
           if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
@@ -116,9 +120,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           setError(err.message || "Invalid security check. Please enter the new one.");
           setCaptchaInput("");
         } else {
-          if (loginMode === "portal") {
-            fetchPortalCaptcha();
-          } else {
+          if (loginMode !== "portal") {
             setCaptchaImage(null);
             setCdigest(null);
           }
@@ -134,6 +136,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         setCaptchaImage(err.image || err.captcha_image);
         setCdigest(err.cdigest || err.session);
         if (err.ocrStatus) setOcrStatus(err.ocrStatus);
+        else if (err.type === "WRONG_CAPTCHA") setOcrStatus("uncertain");
         if (err.loginFormFields) setCaptchaFields(err.loginFormFields);
         if (err.domainFieldName) setDomainFieldName(err.domainFieldName);
         if (err.captchaFieldName) setCaptchaFieldName(err.captchaFieldName);
@@ -141,9 +144,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         setError(err.message || "Please enter the security check.");
         setCaptchaInput("");
       } else {
-        if (loginMode === "portal") {
-          fetchPortalCaptcha();
-        } else {
+        if (loginMode !== "portal") {
           setCaptchaImage(null);
           setCdigest(null);
         }
@@ -302,7 +303,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
             </div>
 
             <AnimatePresence>
-              {captchaImage && (
+              {showCaptchaChallenge && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
@@ -336,7 +337,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                       />
                     </div>
                     <div className="bg-white rounded p-1 h-[48px] flex-shrink-0 flex items-center justify-center overflow-hidden">
-                      <img src={captchaImage} alt="CAPTCHA" className="h-full object-contain mix-blend-multiply" />
+                      <img src={captchaImage || ""} alt="CAPTCHA" className="h-full object-contain mix-blend-multiply" />
                     </div>
                   </div>
                 </motion.div>

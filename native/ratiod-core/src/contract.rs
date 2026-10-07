@@ -1,5 +1,6 @@
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use zeroize::Zeroizing;
 
 pub const API_VERSION: u32 = 1;
@@ -58,7 +59,11 @@ pub enum Request {
     #[serde(rename = "getTimetable")]
     GetTimetable { service: Service },
     #[serde(rename = "refresh")]
-    Refresh { service: Service },
+    Refresh {
+        service: Service,
+        #[serde(default)]
+        cookies: Option<HashMap<String, String>>,
+    },
     #[serde(rename = "clearSession")]
     ClearSession { service: Service },
 }
@@ -73,7 +78,7 @@ impl Request {
             | Self::GetProfile { service }
             | Self::GetMarks { service }
             | Self::GetTimetable { service }
-            | Self::Refresh { service }
+            | Self::Refresh { service, .. }
             | Self::ClearSession { service } => *service,
         }
     }

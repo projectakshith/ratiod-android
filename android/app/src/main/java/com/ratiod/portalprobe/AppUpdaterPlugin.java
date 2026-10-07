@@ -22,7 +22,11 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -51,17 +55,20 @@ public class AppUpdaterPlugin extends Plugin {
                         .build();
 
                 try (Response response = client.newCall(request).execute()) {
-                    if (response.code() == 404) {
-                        JSObject ret = new JSObject();
-                        ret.put("ok", true);
-                        ret.put("updateAvailable", false);
-                        ret.put("message", "No published releases found yet.");
-                        call.resolve(ret);
+                    if (response.code() == 403 || response.code() == 404 || response.code() == 429) {
+                        JSObject fallback = checkLatestReleasePage();
+                        if (fallback != null) {
+                            call.resolve(fallback);
+                        } else {
+                            call.resolve(noPublicRelease());
+                        }
                         return;
                     }
 
                     if (!response.isSuccessful()) {
-                        call.reject("GitHub API returned HTTP " + response.code());
+                        JSObject fallback = checkLatestReleasePage();
+                        if (fallback != null) call.resolve(fallback);
+                        else call.reject("GitHub Releases could not be reached. Check your connection and try again.");
                         return;
                     }
 
@@ -113,9 +120,56 @@ public class AppUpdaterPlugin extends Plugin {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Failed to check GitHub releases: " + e.getMessage(), e);
-                call.reject("Failed to check for updates: " + e.getMessage());
+                try {
+                    JSObject fallback = checkLatestReleasePage();
+                    if (fallback != null) call.resolve(fallback);
+                    else call.reject("GitHub Releases could not be reached. Check your connection and try again.");
+                } catch (Exception fallbackError) {
+                    call.reject("GitHub Releases could not be reached. Check your connection and try again.");
+                }
             }
         }).start();
+    }
+
+    private JSObject checkLatestReleasePage() throws Exception {
+        Request request = new Request.Builder()
+                .url("https://github.com/" + GITHUB_REPO + "/releases/latest")
+                .header("User-Agent", "RatioD-Android-App")
+                .header("Accept", "text/html")
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) return null;
+            String path = response.request().url().encodedPath();
+            Matcher matcher = Pattern.compile("/releases/tag/([^/]+)$").matcher(path);
+            if (!matcher.find()) return null;
+
+            String tagName = URLDecoder.decode(matcher.group(1), StandardCharsets.UTF_8.name());
+            Context context = getContext();
+            String currentVersion = "1.0.0";
+            try {
+                currentVersion = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0).versionName;
+            } catch (Exception ignored) {}
+
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("updateAvailable", isNewerVersion(tagName, currentVersion));
+            ret.put("tagName", tagName);
+            ret.put("releaseName", "Ratio'd " + tagName);
+            ret.put("changelog", "");
+            ret.put("apkUrl", "https://github.com/" + GITHUB_REPO + "/releases/download/"
+                    + tagName + "/ratiod-" + tagName + ".apk");
+            ret.put("currentVersion", currentVersion);
+            return ret;
+        }
+    }
+
+    private JSObject noPublicRelease() {
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        ret.put("updateAvailable", false);
+        ret.put("message", "No public GitHub release is available. The app cannot read private repository releases.");
+        return ret;
     }
 
     private boolean isNewerVersion(String remoteTag, String localVersion) {
