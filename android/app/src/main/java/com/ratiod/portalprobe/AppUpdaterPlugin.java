@@ -167,6 +167,7 @@ public class AppUpdaterPlugin extends Plugin {
     private JSObject noPublicRelease() {
         JSObject ret = new JSObject();
         ret.put("ok", true);
+        ret.put("checkFailed", true);
         ret.put("updateAvailable", false);
         ret.put("message", "No public GitHub release is available. The app cannot read private repository releases.");
         return ret;

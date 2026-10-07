@@ -35,7 +35,9 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
     try {
       const res = await updater.checkUpdate();
       setUpdateInfo(res);
-      if (!res.updateAvailable) {
+      if (res.checkFailed) {
+        setError(res.message || "GitHub releases are not publicly accessible to this app.");
+      } else if (!res.updateAvailable) {
         setStatusMsg(res.message || `You're on the latest version (${res.currentVersion || "v1.0.0"}).`);
       }
     } catch (e: any) {
@@ -167,7 +169,9 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
 
             {!checking && !updateInfo?.updateAvailable && (
               <div className="py-6 flex flex-col items-center text-center gap-3">
-                <CheckCircle2 size={30} className="text-theme-highlight" />
+                {error
+                  ? <AlertCircle size={30} style={{ color: "var(--theme-secondary)" }} />
+                  : <CheckCircle2 size={30} className="text-theme-highlight" />}
                 <p className="text-sm text-theme-text">
                   {statusMsg || "You are currently running the latest version."}
                 </p>
