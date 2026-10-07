@@ -6,16 +6,16 @@ import { useApp } from "@/context/AppContext";
 
 export default function OnboardingRoute() {
   const router = useRouter();
-  const { userData, loginPromise } = useApp();
+  const { userData } = useApp();
 
   useEffect(() => {
     const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
     const hasData = localStorage.getItem("ratio_data") || userData;
     const hasSession = document.cookie.includes("ratio_session=");
 
-    if (!hasSession && !userData) {
+    if (isOnboarded && !hasSession && !userData) {
       router.replace("/login");
-    } else if (isOnboarded && hasData) {
+    } else if (isOnboarded && hasData && (hasSession || userData)) {
       router.replace("/dashboard");
     }
 

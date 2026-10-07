@@ -102,6 +102,15 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
       const loginFn = loginMode === "portal" ? performPortalLogin : performLogin;
 
+      const isMobile = window.innerWidth < 768;
+      const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
+      if (!isOnboarded && isMobile) {
+        setIsExiting(true);
+        loginFn(creds).catch(() => {});
+        setTimeout(() => router.push("/onboarding"), 300);
+        return;
+      }
+
       setLoading(true);
       try {
         const data = await loginFn(creds);
