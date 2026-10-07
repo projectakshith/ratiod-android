@@ -23,36 +23,40 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
   const [showWifiPopup, setShowWifiPopup] = useState(false);
   const prevOffline = React.useRef(isOffline);
   const [nativeUpdatePrompt, setNativeUpdatePrompt] = useState<{ info: any; downloaded: boolean } | null>(null);
+  const updateCheckAfterRefresh = React.useRef(false);
+  const updateCheckRunning = React.useRef(false);
 
   useEffect(() => {
     const updater = (window as any).Capacitor?.Plugins?.AppUpdater;
     if (!updater) return;
-    let checking = false;
+    if (isUpdating) {
+      updateCheckAfterRefresh.current = true;
+      return;
+    }
+    if (!updateCheckAfterRefresh.current) return;
+    updateCheckAfterRefresh.current = false;
+    if (updateCheckRunning.current || document.visibilityState === "hidden") return;
+
     const checkAndStage = async () => {
-      if (checking || document.visibilityState === "hidden") return;
-      const lastCheck = Number(localStorage.getItem("ratiod_native_update_check") || 0);
-      if (Date.now() - lastCheck < 6 * 60 * 60 * 1000) return;
-      checking = true;
-      localStorage.setItem("ratiod_native_update_check", String(Date.now()));
+      updateCheckRunning.current = true;
       try {
         const info = await updater.checkUpdate();
-        if (!info?.updateAvailable || !info?.apkUrl) return;
-        try {
-          await updater.downloadUpdate({ apkUrl: info.apkUrl });
-          setNativeUpdatePrompt({ info, downloaded: true });
-        } catch {
-          setNativeUpdatePrompt({ info, downloaded: false });
+        if (info?.updateAvailable && info?.apkUrl) {
+          try {
+            await updater.downloadUpdate({ apkUrl: info.apkUrl });
+            setNativeUpdatePrompt({ info, downloaded: true });
+          } catch {
+            setNativeUpdatePrompt({ info, downloaded: false });
+          }
         }
       } catch {
         // Keep automatic checks quiet; Settings still offers a manual check.
       } finally {
-        checking = false;
+        updateCheckRunning.current = false;
       }
     };
-    const onRefreshCompleted = () => { void checkAndStage(); };
-    window.addEventListener("ratio_refresh_completed", onRefreshCompleted);
-    return () => window.removeEventListener("ratio_refresh_completed", onRefreshCompleted);
-  }, []);
+    void checkAndStage();
+  }, [isUpdating]);
 
   useEffect(() => {
     if (isOffline && !prevOffline.current) {
@@ -235,7 +239,7 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
   }, [showWelcome, setShowWelcome]);
 
   return (
-    <main className="bg-theme-bg min-h-full w-full flex flex-col relative">
+    <main className="bg-theme-bg h-full min-h-full w-full flex flex-col relative overflow-hidden">
       <AnimatePresence>
         {isOffline && (
           <motion.div
@@ -335,10 +339,10 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
       </AnimatePresence>
 
       <div 
-        className="flex-1 relative z-10 w-full"
+        className="flex-1 min-h-0 relative z-10 w-full"
         style={{
-          paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
-          paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))",
+          paddingTop: 0,
+          paddingBottom: 0,
           paddingLeft: "env(safe-area-inset-left, 0px)",
           paddingRight: "env(safe-area-inset-right, 0px)",
         }}

@@ -67,7 +67,7 @@ function BrutalistTheme({ children, isSwipeDisabled }: BrutalistThemeProps) {
 
   return (
     <div 
-      className="h-[100dvh] w-full bg-black relative overflow-hidden"
+      className="h-full w-full bg-black relative overflow-hidden"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -81,7 +81,11 @@ function BrutalistTheme({ children, isSwipeDisabled }: BrutalistThemeProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="absolute top-0 left-0 w-full h-full bg-[#050505]"
+            className="absolute inset-x-0 bg-[#050505]"
+            style={{
+              top: "max(1rem, env(safe-area-inset-top, 0px))",
+              bottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))",
+            }}
           >
             {children}
           </motion.div>

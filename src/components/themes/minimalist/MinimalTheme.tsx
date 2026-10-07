@@ -82,9 +82,15 @@ function MinimalTheme({ children, isSwipeDisabled }: MinimalThemeProps) {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={{ transform: "translateZ(0)", touchAction: "pan-y" }}
+      style={{
+        transform: "translateZ(0)",
+        touchAction: "pan-y",
+        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
+        paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))",
+        boxSizing: "border-box",
+      }}
     >
-      <div className="flex-1 relative">
+      <div className="flex-1 min-h-0 relative">
         {children}
       </div>
 
