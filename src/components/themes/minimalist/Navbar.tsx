@@ -28,7 +28,7 @@ export default function Navbar() {
             onClick={() => {
               Haptics.light();
             }}
-            className={`min-h-9 px-2 flex items-center justify-center text-[11px] font-bold uppercase tracking-[0.15em] transition-colors duration-300 ${
+            className={`min-h-9 px-2 flex items-center justify-center text-[10px] font-bold uppercase tracking-[0.15em] transition-colors duration-300 ${
               isActive ? "text-theme-text" : "text-theme-subtle"
             }`}
             style={{ fontFamily: "'Montserrat', sans-serif" }}

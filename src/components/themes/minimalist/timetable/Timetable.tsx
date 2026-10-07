@@ -627,7 +627,7 @@ export default function Timetable({
           </AnimatePresence>
         </motion.div>
 
-        <div className="fixed bottom-[85px] left-1/2 -translate-x-1/2 bg-theme-accent/30 backdrop-blur-xl p-1.5 pr-2 rounded-full flex items-center gap-1 z-40 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
+        <div className="fixed bottom-[105px] left-1/2 -translate-x-1/2 bg-theme-accent/30 backdrop-blur-xl p-1.5 pr-2 rounded-full flex items-center gap-1 z-40 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
           <span
             className="text-[11px] font-bold text-theme-accent ml-3 mr-1 tracking-widest"
             style={{ fontFamily: "'Montserrat', sans-serif" }}
