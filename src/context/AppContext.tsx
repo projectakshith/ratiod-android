@@ -223,12 +223,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           password: creds.password,
         });
 
+        let previous: any = {};
+        try { previous = JSON.parse(localStorage.getItem("ratio_data") || "{}"); } catch {}
+        const profileReady = data.profile && [
+          data.profile.dept,
+          data.profile.program,
+          data.profile.section,
+          data.profile.semester,
+          data.profile.batch,
+          data.profile.mobile,
+        ].some(Boolean);
+        const merged: any = {
+          ...previous,
+          ...data,
+          attendance: data.attendance?.length ? data.attendance : previous.attendance || [],
+          marks: data.marks?.length ? data.marks : previous.marks || [],
+          profile: profileReady ? data.profile : previous.profile || data.profile || {},
+          schedule: Object.keys(data.schedule || {}).length ? data.schedule : previous.schedule || {},
+          courses: Object.keys(data.courses || {}).length ? data.courses : previous.courses || {},
+          isPortal: Boolean(previous.isPortal),
+        };
+        merged.timetable = merged.schedule;
         EncryptionUtils.setSessionCookie();
-        setUserData(data);
-        localStorage.setItem("ratio_data", JSON.stringify(data));
+        setUserData(merged);
+        localStorage.setItem("ratio_data", JSON.stringify(merged));
         window.dispatchEvent(new Event("ratio_refresh_completed"));
 
-        return data;
+        return merged;
       } catch (err: any) {
         if (err.message === 'Backend error') {
           setIsBackendError(true);
@@ -343,11 +364,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         EncryptionUtils.setSessionCookie();
         data.isPortal = true;
-        setUserData(data);
-        localStorage.setItem("ratio_data", JSON.stringify(data));
+        let previous: any = {};
+        try { previous = JSON.parse(localStorage.getItem("ratio_data") || "{}"); } catch {}
+        const merged: any = {
+          ...previous,
+          ...data,
+          profile: previous.profile && Object.keys(previous.profile).length ? previous.profile : data.profile || {},
+          schedule: Object.keys(previous.schedule || {}).length ? previous.schedule : data.schedule || {},
+          courses: Object.keys(previous.courses || {}).length ? previous.courses : data.courses || {},
+        };
+        merged.timetable = merged.schedule;
+        setUserData(merged);
+        localStorage.setItem("ratio_data", JSON.stringify(merged));
         window.dispatchEvent(new Event("ratio_refresh_completed"));
 
-        return data;
+        return merged;
       } catch (err: any) {
         if (err.message === 'Backend error') {
           setIsBackendError(true);
@@ -375,19 +406,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const [academiaCookies, academiaCreds, portalCookies, portalCreds] = (await Promise.all([
-        EncryptionUtils.loadDecrypted("academia_cookies"),
-        EncryptionUtils.loadDecrypted("ratio_credentials"),
+      const [portalCookies, portalCreds] = (await Promise.all([
         EncryptionUtils.loadDecrypted("portal_cookies"),
         EncryptionUtils.loadDecrypted("portal_credentials"),
       ])) as any[];
 
       const hasPortal = !!(portalCookies || portalCreds?.password);
-      const hasAcademia = !!(academiaCookies || academiaCreds?.username);
-      const needsAcademia = hasAcademia && (!hasPortal || !localStorage.getItem("ratio_timetable_synced"));
-      if (!hasPortal && !needsAcademia) return existingData;
-
-      let loggedOut = false;
+      if (!hasPortal) return existingData;
 
       const refreshPortal = async () => {
         setIsCheckingPortal(true);
@@ -424,74 +449,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       };
 
-      const refreshAcademia = async () => {
-        const send = (withPassword: boolean) => fetchWithLoadBalancer("/refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: academiaCreds?.username,
-            cookies: academiaCookies,
-            ...(withPassword ? { password: academiaCreds?.password } : {}),
-          }),
-        });
-        try {
-          let res = await send(false);
-          let retried = false;
-          if (res.status === 401 && academiaCreds?.password) {
-            const err = await res.clone().json().catch(() => ({}));
-            if (err?.detail?.type === "SESSION_EXPIRED") {
-              res = await send(true);
-              retried = true;
-            }
-          }
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data?.success) {
-            const invalid = data?.detail === "Invalid Credentials" || data?.detail?.type === "INVALID_CREDENTIALS";
-            if (res.status === 401 && !hasPortal && (retried || invalid)) {
-              loggedOut = true;
-              await logout();
-              return null;
-            }
-            reportError(typeof data?.detail === "string" ? data.detail : hasPortal ? "timetable didn't sync" : "academia didn't sync");
-            return null;
-          }
-          if (data.cookies) {
-            await EncryptionUtils.saveEncrypted("academia_cookies", data.cookies);
-            delete data.cookies;
-          }
-          return data;
-        } catch (err) {
-          await checkConnectivity(err);
-          return null;
-        }
-      };
-
-      const [portalData, academiaData] = await Promise.all([
-        hasPortal ? refreshPortal() : null,
-        needsAcademia ? refreshAcademia() : null,
-      ]);
-
-      if (loggedOut || (!portalData && !academiaData)) return existingData;
+      const portalData = await refreshPortal();
+      if (!portalData) return existingData;
 
       const fresh: Record<string, any> = {};
       if (portalData) {
         fresh.attendance = portalData.attendance;
         fresh.isPortal = true;
-        for (const key of ["monthly", "marks", "courses", "profile"]) {
-          if (portalData[key]) fresh[key] = portalData[key];
-        }
-        if (portalData.schedule && !hasAcademia) fresh.schedule = portalData.schedule;
-      }
-      if (academiaData) {
-        const { success, ...rest } = academiaData;
-        if (!hasPortal) Object.assign(fresh, rest);
-        else if (rest.schedule && Object.keys(rest.schedule).length > 0) {
-          fresh.schedule = rest.schedule;
-          localStorage.setItem("ratio_timetable_synced", "1");
+        for (const key of ["monthly", "marks", "courses"]) {
+          if (portalData[key] && (!Array.isArray(portalData[key]) || portalData[key].length > 0)) {
+            fresh[key] = portalData[key];
+          }
         }
       }
-
-      if (fresh.schedule) fresh.timetable = fresh.schedule;
 
       EncryptionUtils.setSessionCookie();
 
@@ -538,7 +508,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsUpdating(false);
       updateInProgress.current = false;
     }
-  }, [logout, checkConnectivity]);
+  }, [checkConnectivity]);
 
   useEffect(() => {
     const cachedData = localStorage.getItem("ratio_data");

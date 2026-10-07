@@ -107,8 +107,16 @@ impl Academia {
                 }
                 return Err(CoreError::new(ErrorCode::SessionConflict));
             }
-            let json: serde_json::Value = serde_json::from_str(html)
-                .map_err(|_| CoreError::new(ErrorCode::UnexpectedResponse))?;
+            let json: serde_json::Value = serde_json::from_str(html).map_err(|_| {
+                let body = html.to_lowercase();
+                if body.contains("invalid credentials")
+                    || body.contains("check your username/password")
+                {
+                    CoreError::new(ErrorCode::InvalidCredentials)
+                } else {
+                    CoreError::new(ErrorCode::UnexpectedResponse)
+                }
+            })?;
             if json["status"]
                 .as_str()
                 .is_some_and(|s| s.eq_ignore_ascii_case("fail"))
@@ -162,7 +170,7 @@ impl Academia {
             let token = Zeroizing::new(
                 json["data"]["access_token"]
                     .as_str()
-                    .ok_or_else(|| CoreError::new(ErrorCode::UnexpectedResponse))?
+                    .ok_or_else(|| CoreError::new(ErrorCode::InvalidCredentials))?
                     .to_owned(),
             );
             let redirect = json["data"]["oauthorize_uri"]
@@ -249,7 +257,7 @@ impl Academia {
             "/srm_university/academia-academic-services/page/Unified_Time_Table_2025_{batch}"
         ))?;
         let schedule = academic_parsers::timetable(&grid, &courses)?;
-        Ok(TimetableData { schedule, courses })
+        Ok(TimetableData { profile: Some(profile), schedule, courses })
     }
 }
 

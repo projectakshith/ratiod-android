@@ -392,5 +392,5 @@ pub fn timetable(html: &str) -> Result<TimetableData> {
             );
         }
     }
-    Ok(TimetableData { schedule, courses })
+    Ok(TimetableData { profile: None, schedule, courses })
 }

@@ -139,6 +139,8 @@ pub type Schedule =
     std::collections::BTreeMap<String, std::collections::BTreeMap<String, ScheduleSlot>>;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct TimetableData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Profile>,
     pub schedule: Schedule,
     pub courses: CourseMap,
 }

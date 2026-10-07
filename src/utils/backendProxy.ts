@@ -23,9 +23,11 @@ function nativeErrorResponse(error: any, fallback = "Refresh failed"): Response 
 
 function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: string) {
   const attSection = sec?.attendance?.ok ? sec.attendance.data : { attendance: [], monthly: [] };
-  const profSection = sec?.profile?.ok ? sec.profile.data : (fallbackUsername ? { name: fallbackUsername, regNo: fallbackUsername } : {});
-  const marksSection = sec?.marks?.ok ? sec.marks.data : { marks: [] };
   const ttSection = sec?.timetable?.ok ? sec.timetable.data : { schedule: {}, courses: {} };
+  const profSection = sec?.profile?.ok
+    ? sec.profile.data
+    : ttSection.profile || (fallbackUsername ? { name: fallbackUsername, regNo: fallbackUsername } : {});
+  const marksSection = sec?.marks?.ok ? sec.marks.data : { marks: [] };
 
   const requiredSectionOk = isPortal ? Boolean(sec?.attendance?.ok) : Boolean(sec?.timetable?.ok);
   return {
@@ -160,17 +162,18 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
         const loginRes = await plugin.nativeInvoke({ request: loginReq });
 
         if (loginRes.ok) {
-          const refreshRes = await plugin.nativeInvoke({
-            request: { apiVersion: 1, service: "academia", method: "refresh" }
+          const timetableRes = await plugin.nativeInvoke({
+            request: { apiVersion: 1, service: "academia", method: "getTimetable" }
           });
-          const merged = refreshRes.ok
-            ? extractRefreshSections(refreshRes.data?.sections, false, creds.username)
-            : { success: true, isPortal: false, profile: { name: creds.username, regNo: creds.username }, schedule: {}, timetable: {}, courses: {} };
-          // The native login already verified the authenticated timetable page.
-          // A parser/refresh failure must not turn accepted credentials into a
-          // login failure; the normal refresh event reports and retries that data fetch.
-          if (!merged.success) merged.success = true;
-          return jsonResponse(merged);
+          const data = timetableRes.data || {};
+          return jsonResponse({
+            success: true,
+            isPortal: false,
+            profile: data.profile || { name: creds.username, regNo: creds.username },
+            schedule: data.schedule || {},
+            timetable: data.schedule || {},
+            courses: data.courses || {},
+          });
         } else {
           const err = loginRes.error || {};
           if (err.code === "CAPTCHA_REQUIRED" || err.code === "CAPTCHA_REJECTED") {
@@ -187,9 +190,13 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
               }
             }, 401);
           }
+          const invalidCredentials = err.code === "INVALID_CREDENTIALS";
           return jsonResponse({
             success: false,
-            detail: err.message || "Invalid credentials"
+            detail: {
+              type: err.code || "AUTHENTICATION_FAILED",
+              message: invalidCredentials ? "Invalid credentials" : err.message || "Academia login failed",
+            }
           }, 401);
         }
       } catch (e: any) {
