@@ -7,6 +7,7 @@ import { compareData, DataDiff } from "@/utils/shared/diffUtils";
 import { isNativeNotifications, scheduleClassReminders, sendNotification } from "@/utils/shared/notifs";
 import { fetchWithLoadBalancer } from "@/utils/backendProxy";
 import { UpdateHistoryItem } from "@/types";
+import { isMeaningfulAcademiaName } from "@/utils/academia/profile";
 
 import { getScheduleStatus } from "@/utils/academia/academiaLogic";
 import calendarDataJson from "@/data/calendar_data.json";
@@ -248,13 +249,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         try { previous = JSON.parse(localStorage.getItem("ratio_data") || "{}"); } catch {}
         const parsedName = String(data.profile?.name || "").trim();
         const profileReady = data.profile && data.profileParsed === true &&
-          parsedName.length > 0 && !["n/a", "unknown"].includes(parsedName.toLowerCase());
+          isMeaningfulAcademiaName(parsedName, data.profile?.regNo, creds.username);
+        const previousProfileReady = isMeaningfulAcademiaName(
+          previous.profile?.name,
+          previous.profile?.regNo,
+          creds.username,
+        );
         const merged: any = {
           ...previous,
           ...data,
           attendance: data.attendance?.length ? data.attendance : previous.attendance || [],
           marks: data.marks?.length ? data.marks : previous.marks || [],
-          profile: profileReady ? data.profile : previous.profile || data.profile || {},
+          profile: profileReady
+            ? data.profile
+            : previousProfileReady
+              ? previous.profile
+              : { ...(data.profile || {}), name: "Student" },
           schedule: Object.keys(data.schedule || {}).length ? data.schedule : previous.schedule || {},
           courses: Object.keys(data.courses || {}).length ? data.courses : previous.courses || {},
           isPortal: Boolean(previous.isPortal),
@@ -530,7 +540,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const cachedData = localStorage.getItem("ratio_data");
     const cachedName = localStorage.getItem("ratiod_custom_name");
-    const cachedSeed = localStorage.getItem("ratio_profile_seed");
+    let cachedSeed = localStorage.getItem("ratio_profile_seed");
 
     if (cachedName) setCustomDisplayName(cachedName);
 
@@ -543,12 +553,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (cachedData) {
       try {
         parsed = JSON.parse(cachedData);
+        const oldName = String(parsed.profile?.name || "").trim();
+        if (parsed.profile && !isMeaningfulAcademiaName(oldName, parsed.profile?.regNo)) {
+          parsed = { ...parsed, profile: { ...parsed.profile, name: "Student" } };
+          localStorage.setItem("ratio_data", JSON.stringify(parsed));
+          if (cachedSeed?.trim().toLowerCase() === oldName.toLowerCase()) {
+            localStorage.removeItem("ratio_profile_seed");
+            cachedSeed = null;
+          }
+        }
         setUserData(parsed);
 
-        runMigration().then(() => {
+        void runMigration().catch(() => undefined).finally(() => {
           if (!hasRefreshed.current) {
             hasRefreshed.current = true;
-            refreshData(parsed);
+            void refreshData(parsed);
           }
         });
       } catch {
@@ -583,6 +602,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("beforeinstallprompt", installPromptHandler);
     };
   }, []);
+
+  useEffect(() => {
+    let wasHidden = document.visibilityState === "hidden";
+    let lastRefreshAt = 0;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        wasHidden = true;
+        return;
+      }
+      if (!wasHidden) return;
+      wasHidden = false;
+
+      const now = Date.now();
+      if (now - lastRefreshAt < 3000) return;
+      lastRefreshAt = now;
+
+      let savedData: any;
+      try {
+        savedData = JSON.parse(localStorage.getItem("ratio_data") || "null");
+      } catch {
+        return;
+      }
+      if (!savedData) return;
+
+      void (async () => {
+        const [portalCookies, portalCredentials] = await Promise.all([
+          EncryptionUtils.loadDecrypted("portal_cookies"),
+          EncryptionUtils.loadDecrypted("portal_credentials"),
+        ]);
+        if (portalCookies || (portalCredentials as any)?.password) {
+          await refreshData(savedData);
+        }
+      })().catch(() => undefined);
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [refreshData]);
 
   useEffect(() => {
     if (userData?.profile?.name && !localStorage.getItem("ratio_profile_seed")) {

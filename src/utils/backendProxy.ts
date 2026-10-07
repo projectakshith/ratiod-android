@@ -1,3 +1,5 @@
+import { isMeaningfulAcademiaName } from "@/utils/academia/profile";
+
 /**
  * Ratio'd — Native Android & Web Backend Adapter
  * Bridges Next.js frontend calls to the on-device native Android plugin
@@ -29,7 +31,7 @@ function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: 
   const ttSection = sec?.timetable?.ok ? sec.timetable.data : { schedule: {}, courses: {} };
   const profSection = sec?.profile?.ok
     ? sec.profile.data
-    : ttSection.profile || (fallbackUsername ? { name: fallbackUsername, regNo: fallbackUsername } : {});
+    : ttSection.profile || (fallbackUsername ? { regNo: fallbackUsername } : {});
   const marksSection = sec?.marks?.ok ? sec.marks.data : { marks: [] };
 
   const requiredSectionOk = isPortal ? Boolean(sec?.attendance?.ok) : Boolean(sec?.timetable?.ok);
@@ -175,16 +177,16 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           const parsedProfile = data.profile || {};
           const realName = String(parsedProfile.name || "").trim();
           const realRegNo = String(parsedProfile.regNo || "").trim();
+          const hasRealName = isMeaningfulAcademiaName(realName, realRegNo, creds.username);
           return jsonResponse({
             success: true,
             isPortal: false,
             profile: {
               ...parsedProfile,
-              // Keep the profile header populated if SRM omits its name field.
-              name: realName || realRegNo || creds.username,
+              name: hasRealName ? realName : "",
               regNo: realRegNo || creds.username,
             },
-            profileParsed: Boolean(realName && realName.toLowerCase() !== String(creds.username || "").toLowerCase()),
+            profileParsed: hasRealName,
             schedule: data.schedule || {},
             timetable: data.schedule || {},
             courses: data.courses || {},
@@ -415,11 +417,20 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
       });
 
       if (res.ok) {
+        const parsedProfile = res.profile || {};
+        const realName = String(parsedProfile.name || "").trim();
+        const realRegNo = String(parsedProfile.regNo || "").trim();
+        const hasRealName = isMeaningfulAcademiaName(realName, realRegNo, creds.username);
         return jsonResponse({
           success: true,
           isPortal: false,
           attendance: res.attendance || [],
-          profile: res.profile || { name: creds.username, regNo: creds.username },
+          profile: {
+            ...parsedProfile,
+            name: hasRealName ? realName : "",
+            regNo: realRegNo || creds.username,
+          },
+          profileParsed: hasRealName,
           marks: res.marks || [],
           schedule: res.schedule || {},
           timetable: res.timetable || res.schedule || {},

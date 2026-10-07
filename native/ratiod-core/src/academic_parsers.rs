@@ -81,6 +81,14 @@ fn unescape(raw: &str) -> Result<String> {
     Ok(out)
 }
 
+fn normalized_label(input: &str) -> String {
+    input
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 pub fn attendance(html: &str) -> Result<AttendanceData> {
     let doc = Html::parse_document(html);
     let code = Regex::new(r"^[A-Z0-9]{8,12}").unwrap();
@@ -133,15 +141,24 @@ pub fn profile(html: &str) -> Result<Profile> {
     for row in doc.select(&select("tr")) {
         let nodes: Vec<_> = row.select(&select("td")).collect();
         for pair in nodes.windows(2) {
-            let label = text(pair[0]).to_lowercase();
+            let label = normalized_label(&text(pair[0]));
             let value = text(pair[1]);
-            if label.contains("registration number") || label.contains("register no") {
+            if label.contains("registrationnumber")
+                || label.contains("registrationno")
+                || label.contains("registernumber")
+                || label == "regno"
+            {
                 profile.reg_no = value;
                 recognized = true;
-            } else if label.contains("student name") || label == "name" {
+            } else if label == "name"
+                || label.contains("studentname")
+                || label == "nameofstudent"
+                || label == "nameofthestudent"
+                || label == "fullname"
+            {
                 profile.name = value;
                 recognized = true;
-            } else if label.contains("mobile") || label.contains("email id") {
+            } else if label.contains("mobile") || label.contains("emailid") {
                 profile.mobile = value;
             } else if label.contains("program") {
                 profile.program = value;

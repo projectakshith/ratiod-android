@@ -161,9 +161,8 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
       sessionStorage.setItem("ratio_splash_played", "true");
       const isOnboarded = localStorage.getItem("ratiod_onboarded") === "true";
 
-      if (!isOnboarded) {
-        setIsFirstSplash(true);
-      }
+      if (isOnboarded) return;
+      setIsFirstSplash(true);
 
       let meta = document.querySelector('meta[name="theme-color"]');
       if (!meta) {
@@ -178,7 +177,7 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
       const safetyTimer = setTimeout(() => {
         setShowSplash(false);
         meta!.setAttribute("content", prevColor);
-      }, !isOnboarded ? 3500 : 800);
+      }, 3500);
       return () => clearTimeout(safetyTimer);
     }
   }, []);
