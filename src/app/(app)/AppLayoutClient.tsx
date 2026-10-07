@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/context/AppContext";
 import { useThemeUiStyle, useTheme } from "@/context/ThemeContext";
-import { useAcademiaData } from "@/hooks/useAcademiaData";
 import SettingsPage from "@/components/shared/SettingsPage";
 import FeedbackPopup from "@/components/shared/FeedbackPopup";
 import CommunityPopup from "@/components/shared/CommunityPopup";
@@ -67,7 +66,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const uiStyle = useThemeUiStyle();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSwipeDisabled, setIsSwipeDisabled] = useState(false);
-  const academia = useAcademiaData(userData as any);
   const router = useRouter();
   const openSettings = useCallback(() => setIsSettingsOpen(true), []);
   const closeSettings = useCallback(() => setIsSettingsOpen(false), []);
@@ -92,7 +90,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const sharedProps = useMemo(() => ({
     data: userData as any,
-    academia,
     onLogout: logout,
     customDisplayName,
     onUpdateName: handleUpdateName,

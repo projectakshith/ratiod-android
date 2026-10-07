@@ -49,10 +49,9 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
         checking = false;
       }
     };
-    void checkAndStage();
-    const onResume = () => { if (document.visibilityState === "visible") void checkAndStage(); };
-    document.addEventListener("visibilitychange", onResume);
-    return () => document.removeEventListener("visibilitychange", onResume);
+    const onRefreshCompleted = () => { void checkAndStage(); };
+    window.addEventListener("ratio_refresh_completed", onRefreshCompleted);
+    return () => window.removeEventListener("ratio_refresh_completed", onRefreshCompleted);
   }, []);
 
   useEffect(() => {
@@ -338,8 +337,8 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
       <div 
         className="flex-1 relative z-10 w-full"
         style={{
-          paddingTop: "max(2.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem))",
-          paddingBottom: "max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem))",
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingBottom: 0,
           paddingLeft: "env(safe-area-inset-left, 0px)",
           paddingRight: "env(safe-area-inset-right, 0px)",
         }}

@@ -41,7 +41,9 @@ export default function NativeUpdateModal({ isOpen, onClose, initialUpdate, alre
       if (res.checkFailed) {
         setError(res.message || "GitHub releases are not publicly accessible to this app.");
       } else if (!res.updateAvailable) {
-        setStatusMsg(res.message || `You're on the latest version (${res.currentVersion || "v1.0.0"}).`);
+        const installedVersion = res.currentVersion || "v1.0.0";
+        const latestRelease = res.tagName || installedVersion;
+        setStatusMsg(res.message || `Installed ${installedVersion}. Latest published release: ${latestRelease}.`);
       } else {
         void downloadInBackground(res);
       }

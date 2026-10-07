@@ -274,8 +274,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         EncryptionUtils.setSessionCookie();
         setUserData(merged);
         localStorage.setItem("ratio_data", JSON.stringify(merged));
-        window.dispatchEvent(new Event("ratio_refresh_completed"));
-
         return merged;
       } catch (err: any) {
         if (err.message === 'Backend error') {
@@ -403,8 +401,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         merged.timetable = merged.schedule;
         setUserData(merged);
         localStorage.setItem("ratio_data", JSON.stringify(merged));
-        window.dispatchEvent(new Event("ratio_refresh_completed"));
-
         return merged;
       } catch (err: any) {
         if (err.message === 'Backend error') {
@@ -433,13 +429,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const [portalCookies, portalCreds] = (await Promise.all([
+      const [portalCookies, portalCreds, academiaCreds] = (await Promise.all([
         EncryptionUtils.loadDecrypted("portal_cookies"),
         EncryptionUtils.loadDecrypted("portal_credentials"),
+        EncryptionUtils.loadDecrypted("ratio_credentials"),
       ])) as any[];
 
       const hasPortal = !!(portalCookies || portalCreds?.password);
-      if (!hasPortal) return existingData;
+      const hasAcademiaCourses = Object.keys(existingData?.courses || {}).length > 0;
+      const needsAcademiaCourses = !hasAcademiaCourses && !!academiaCreds?.username && !!academiaCreds?.password;
+      if (!hasPortal && !needsAcademiaCourses) return existingData;
 
       const refreshPortal = async () => {
         setIsCheckingPortal(true);
@@ -476,18 +475,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       };
 
-      const portalData = await refreshPortal();
-      if (!portalData) return existingData;
+      const refreshAcademiaCourses = async () => {
+        try {
+          const res = await fetchWithLoadBalancer("/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: academiaCreds.username,
+              password: academiaCreds.password,
+            }),
+          }, 60000);
+          const data = await res.json().catch(() => ({}));
+          return res.ok && data?.success && Object.keys(data.courses || {}).length ? data : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const [portalData, academiaData] = await Promise.all([
+        hasPortal ? refreshPortal() : null,
+        needsAcademiaCourses ? refreshAcademiaCourses() : null,
+      ]);
+      if (!portalData && !academiaData) return existingData;
 
       const fresh: Record<string, any> = {};
       if (portalData) {
         fresh.attendance = portalData.attendance;
         fresh.isPortal = true;
-        for (const key of ["monthly", "marks", "courses"]) {
+        for (const key of ["monthly", "marks"]) {
           if (portalData[key] && (!Array.isArray(portalData[key]) || portalData[key].length > 0)) {
             fresh[key] = portalData[key];
           }
         }
+      }
+      if (academiaData?.courses && Object.keys(academiaData.courses).length) {
+        fresh.courses = academiaData.courses;
       }
 
       EncryptionUtils.setSessionCookie();
@@ -529,11 +551,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       setUserData(mergedData);
       localStorage.setItem("ratio_data", JSON.stringify(mergedData));
-      window.dispatchEvent(new Event("ratio_refresh_completed"));
       return mergedData;
     } finally {
       setIsUpdating(false);
       updateInProgress.current = false;
+      window.dispatchEvent(new Event("ratio_refresh_completed"));
     }
   }, [checkConnectivity]);
 
