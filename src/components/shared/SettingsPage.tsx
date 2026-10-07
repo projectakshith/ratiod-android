@@ -24,7 +24,8 @@ import {
   Download,
   ExternalLink,
 } from "lucide-react";
-import { requestNotificationPermission, getNotifPreference, setNotifPreference } from "@/utils/shared/notifs";
+import { requestExactAlarmPermission, requestNotificationPermission, getNotifPreference, setNotifPreference } from "@/utils/shared/notifs";
+import { Capacitor } from "@capacitor/core";
 import { StudentProfile } from "@/types";
 import { useApp } from "@/context/AppContext";
 import NativeUpdateModal from "./NativeUpdateModal";
@@ -264,16 +265,21 @@ const SettingsPage = ({
       setNotifEnabled(false);
       return;
     }
-    if (!window.isSecureContext) {
+    if (!Capacitor.isNativePlatform() && !window.isSecureContext) {
       alert("Notifications require HTTPS.");
       return;
     }
-    if (Notification.permission === "denied") {
+    if (!Capacitor.isNativePlatform() && "Notification" in window && Notification.permission === "denied") {
       alert("Permission blocked. Please reset site permissions.");
       return;
     }
     const granted = await requestNotificationPermission();
-    if (granted) setNotifPreference(true);
+    if (granted) {
+      if (Capacitor.isNativePlatform() && window.confirm("For class reminders to arrive at the 15 and 5 minute marks, allow Ratio'd to schedule exact alarms in Android settings?")) {
+        await requestExactAlarmPermission();
+      }
+      setNotifPreference(true);
+    }
     setNotifEnabled(granted);
   };
 

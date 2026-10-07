@@ -121,27 +121,35 @@ public class AppUpdaterPlugin extends Plugin {
     private boolean isNewerVersion(String remoteTag, String localVersion) {
         String cleanRemote = remoteTag.replaceAll("^[vV]", "").trim();
         String cleanLocal = localVersion.replaceAll("^[vV]", "").trim();
-        if (cleanRemote.isEmpty()) return false;
-        if (cleanRemote.equals(cleanLocal)) return false;
+        int remotePrerelease = cleanRemote.indexOf('-');
+        int localPrerelease = cleanLocal.indexOf('-');
+        String remoteCore = remotePrerelease >= 0 ? cleanRemote.substring(0, remotePrerelease) : cleanRemote;
+        String localCore = localPrerelease >= 0 ? cleanLocal.substring(0, localPrerelease) : cleanLocal;
+        remoteCore = remoteCore.split("\\+", 2)[0];
+        localCore = localCore.split("\\+", 2)[0];
+        if (remoteCore.isEmpty() || localCore.isEmpty()) return false;
 
-        String[] rParts = cleanRemote.split("\\.");
-        String[] lParts = cleanLocal.split("\\.");
+        String[] rParts = remoteCore.split("\\.");
+        String[] lParts = localCore.split("\\.");
         int length = Math.max(rParts.length, lParts.length);
 
         for (int i = 0; i < length; i++) {
-            int r = i < rParts.length ? parseSafeInt(rParts[i]) : 0;
-            int l = i < lParts.length ? parseSafeInt(lParts[i]) : 0;
+            Integer r = i < rParts.length ? parseVersionPart(rParts[i]) : 0;
+            Integer l = i < lParts.length ? parseVersionPart(lParts[i]) : 0;
+            if (r == null || l == null) return false;
             if (r > l) return true;
             if (r < l) return false;
         }
-        return false;
+        // For equal numeric versions, a stable release supersedes a prerelease.
+        return remotePrerelease < 0 && localPrerelease >= 0;
     }
 
-    private int parseSafeInt(String s) {
+    private Integer parseVersionPart(String s) {
+        if (!s.matches("\\d+")) return null;
         try {
-            return Integer.parseInt(s.replaceAll("\\D+", ""));
+            return Integer.parseInt(s);
         } catch (Exception e) {
-            return 0;
+            return null;
         }
     }
 
@@ -150,6 +158,18 @@ public class AppUpdaterPlugin extends Plugin {
         String apkUrl = call.getString("apkUrl");
         if (apkUrl == null || apkUrl.isEmpty()) {
             call.reject("apkUrl is required");
+            return;
+        }
+        Uri requestedApk = Uri.parse(apkUrl);
+        String host = requestedApk.getHost();
+        if (!"https".equalsIgnoreCase(requestedApk.getScheme()) || host == null ||
+                !(host.equalsIgnoreCase("github.com") || host.endsWith(".githubusercontent.com"))) {
+            call.reject("Update APK must come from GitHub over HTTPS");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !getContext().getPackageManager().canRequestPackageInstalls()) {
+            call.reject("Allow Ratio'd to install apps in Android settings, then tap Install again.");
             return;
         }
 
@@ -216,16 +236,12 @@ public class AppUpdaterPlugin extends Plugin {
                     doneProgress.put("percent", 100);
                     notifyListeners("downloadProgress", doneProgress);
 
-                    // Check unknown sources permission on Android 8.0+
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        if (!context.getPackageManager().canRequestPackageInstalls()) {
-                            Activity activity = getActivity();
-                            if (activity != null) {
-                                Intent permIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-                                        .setData(Uri.parse("package:" + context.getPackageName()));
-                                activity.startActivity(permIntent);
-                            }
-                        }
+                    // Permissions may have changed during the download. Never
+                    // launch Package Installer until Android confirms access.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            !context.getPackageManager().canRequestPackageInstalls()) {
+                        call.reject("Allow Ratio'd to install apps in Android settings, then tap Install again.");
+                        return;
                     }
 
                     // Launch Package Installer

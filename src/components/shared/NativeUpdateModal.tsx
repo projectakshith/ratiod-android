@@ -54,6 +54,18 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
     const updater = getUpdater();
     if (!updater || !updateInfo?.apkUrl) return;
 
+    try {
+      const installPermission = await updater.canRequestPackageInstalls();
+      if (!installPermission.canInstall) {
+        await updater.openInstallPermissionSettings();
+        setStatusMsg("Allow Ratio'd to install apps in Android settings, return here, then tap Install again.");
+        return;
+      }
+    } catch (e: any) {
+      setError(e.message || "Could not check Android install permission.");
+      return;
+    }
+
     setDownloading(true);
     setProgress(0);
     setError(null);
@@ -152,6 +164,7 @@ export default function NativeUpdateModal({ isOpen, onClose }: NativeUpdateModal
                     Download &amp; Install Update
                   </button>
                 )}
+                {statusMsg && <p className="text-xs text-slate-400">{statusMsg}</p>}
               </div>
             )}
 

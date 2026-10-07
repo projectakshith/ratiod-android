@@ -1,5 +1,8 @@
 apply plugin: 'com.android.application'
 
+def configuredVersionName = project.findProperty('appVersionName') ?: '1.0.0'
+def configuredVersionCode = project.findProperty('appVersionCode')?.toString()?.toInteger() ?: 1000001
+
 android {
     namespace "com.ratiod.portalprobe"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +10,8 @@ android {
         applicationId "com.ratiod.portalprobe"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode configuredVersionCode
+        versionName configuredVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters 'arm64-v8a'

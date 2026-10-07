@@ -140,7 +140,21 @@ and [Agent 2 handoff](docs/agent-2-handoff.md) before building or wiring the ada
 
 ## updates
 
-updates are shipped directly through github releases. pushing a git tag triggers the github action which builds and attaches the signed apk. the in-app updater detects new releases, downloads the apk, and prompts to install.
+Android updates are distributed as APK assets on GitHub Releases. In the app, open
+**Settings → Check for Updates** to check the latest stable release, download it,
+and hand it to Android's package installer. Android asks the user to confirm the
+installation; the app cannot silently replace itself. If Android asks for
+permission to install apps, allow it, return to Ratio'd, and tap **Download &
+Install Update** again.
+
+To publish an update, push a `vMAJOR.MINOR.PATCH` tag (for example `v1.2.3`). The
+release workflow applies that version to `versionName` and generates an increasing
+`versionCode`, so the installed app recognizes the release and Android accepts it
+as an upgrade. Configure the repository secrets `KEYSTORE_BASE64`,
+`KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` with the same persistent
+release keystore for every tagged release. The workflow rejects a tagged release
+without those secrets because signing each update with a different key prevents
+Android from installing it over the existing app.
 
 ---
 

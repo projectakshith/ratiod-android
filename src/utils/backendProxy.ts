@@ -15,10 +15,13 @@ function jsonResponse(data: any, status = 200): Response {
 function nativeErrorResponse(error: any, fallback = "Refresh failed"): Response {
   const code = String(error?.code || "").toUpperCase();
   const message = String(error?.message || fallback);
-  const sessionError = code === "SESSION_EXPIRED" || code === "SESSION_CONFLICT";
+  const authError = [
+    "SESSION_EXPIRED", "SESSION_CONFLICT", "INVALID_CREDENTIALS", "ACCOUNT_LOCKED",
+    "CAPTCHA_REQUIRED", "CAPTCHA_REJECTED", "OCR_UNCERTAIN", "OCR_UNAVAILABLE",
+  ].includes(code);
   return jsonResponse({
     detail: { type: code || "NATIVE_ERROR", message },
-  }, sessionError ? 401 : 502);
+  }, authError ? 401 : 502);
 }
 
 function extractRefreshSections(sec: any, isPortal: boolean, fallbackUsername?: string) {
@@ -165,11 +168,23 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
           const timetableRes = await plugin.nativeInvoke({
             request: { apiVersion: 1, service: "academia", method: "getTimetable" }
           });
+          if (!timetableRes.ok) {
+            return nativeErrorResponse(timetableRes.error, "Academia timetable could not be parsed");
+          }
           const data = timetableRes.data || {};
+          const parsedProfile = data.profile || {};
+          const realName = String(parsedProfile.name || "").trim();
+          const realRegNo = String(parsedProfile.regNo || "").trim();
           return jsonResponse({
             success: true,
             isPortal: false,
-            profile: data.profile || { name: creds.username, regNo: creds.username },
+            profile: {
+              ...parsedProfile,
+              // Keep the profile header populated if SRM omits its name field.
+              name: realName || realRegNo || creds.username,
+              regNo: realRegNo || creds.username,
+            },
+            profileParsed: Boolean(realName && realName.toLowerCase() !== String(creds.username || "").toLowerCase()),
             schedule: data.schedule || {},
             timetable: data.schedule || {},
             courses: data.courses || {},
@@ -207,11 +222,28 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
     // 4. Data Refresh
     if (endpoint === "/portal/refresh") {
       try {
-        const refreshRes = await plugin.nativeInvoke({
+        const payload = JSON.parse((options.body as string) || "{}");
+        let refreshRes = await plugin.nativeInvoke({
           request: { apiVersion: 1, service: "portal", method: "refresh" }
         });
+        if (!refreshRes.ok && refreshRes.error?.code === "SESSION_EXPIRED" && payload.username && payload.password) {
+          const loginRes = await plugin.nativeInvoke({
+            request: {
+              apiVersion: 1,
+              service: "portal",
+              method: "login",
+              username: payload.username,
+              password: payload.password,
+              useOcr: true,
+            }
+          });
+          if (!loginRes.ok) return nativeErrorResponse(loginRes.error, "Student Portal sign-in is required");
+          refreshRes = await plugin.nativeInvoke({
+            request: { apiVersion: 1, service: "portal", method: "refresh" }
+          });
+        }
         if (refreshRes.ok) {
-          const merged = extractRefreshSections(refreshRes.data?.sections, true);
+          const merged = extractRefreshSections(refreshRes.data?.sections, true, payload.username);
           return jsonResponse(merged);
         }
         return nativeErrorResponse(refreshRes.error);
@@ -320,18 +352,22 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
 
       if (loginRes.ok) {
         const attRes = await plugin.getAttendance().catch(() => ({}));
-        return jsonResponse({
+        const result: any = {
           success: true,
           isPortal: true,
           attendance: attRes.courses || loginRes.attendance || [],
           monthly: attRes.monthly || loginRes.monthly || [],
-          profile: loginRes.profile || attRes.profile || { name: creds.username, regNo: creds.username },
           marks: loginRes.marks || attRes.marks || [],
-          schedule: loginRes.schedule || attRes.schedule || {},
-          timetable: loginRes.timetable || attRes.timetable || loginRes.schedule || {},
-          courses: loginRes.courses || attRes.courses || {},
           cookies: loginRes.cookies || {},
-        });
+        };
+        // Academia owns the cached profile and timetable. The native portal
+        // parser can return empty objects for fields it did not parse, so do
+        // not expose those as updates that would overwrite Academia data.
+        const portalMarks = Array.isArray(loginRes.marks) && loginRes.marks.length
+          ? loginRes.marks
+          : attRes.marks;
+        if (Array.isArray(portalMarks) && portalMarks.length) result.marks = portalMarks;
+        return jsonResponse(result);
       } else {
         const isWrongCaptcha = loginRes.reason === "wrong_captcha";
         if (isWrongCaptcha) {
@@ -422,11 +458,7 @@ async function handleNativeBridge(endpoint: string, options: RequestInit = {}): 
         isPortal: true,
         attendance: attRes.courses || [],
         monthly: attRes.monthly || [],
-        profile: attRes.profile || {},
         marks: attRes.marks || [],
-        schedule: attRes.schedule || {},
-        timetable: attRes.timetable || attRes.schedule || {},
-        courses: attRes.courses || {}
       });
     } catch (e: any) {
       return jsonResponse({ detail: e.message || "Refresh failed" }, 500);

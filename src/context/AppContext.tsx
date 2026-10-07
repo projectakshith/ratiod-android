@@ -4,7 +4,7 @@ import { EncryptionUtils, runMigration } from "@/utils/shared/Encryption";
 import { useRouter } from "next/navigation";
 import { AcademiaData } from "@/types";
 import { compareData, DataDiff } from "@/utils/shared/diffUtils";
-import { sendNotification } from "@/utils/shared/notifs";
+import { isNativeNotifications, scheduleClassReminders, sendNotification } from "@/utils/shared/notifs";
 import { fetchWithLoadBalancer } from "@/utils/backendProxy";
 import { UpdateHistoryItem } from "@/types";
 
@@ -101,6 +101,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isNativeNotifications()) {
+      const syncNativeReminders = () => {
+        void scheduleClassReminders(userData?.schedule, calendarDataJson as any[]);
+      };
+      syncNativeReminders();
+      const onVisibility = () => {
+        if (document.visibilityState === "visible") syncNativeReminders();
+      };
+      window.addEventListener("ratio_notifications_changed", syncNativeReminders);
+      window.addEventListener("custom_classes_updated", syncNativeReminders);
+      document.addEventListener("visibilitychange", onVisibility);
+      const rollingRefresh = window.setInterval(syncNativeReminders, 6 * 60 * 60 * 1000);
+      return () => {
+        window.removeEventListener("ratio_notifications_changed", syncNativeReminders);
+        window.removeEventListener("custom_classes_updated", syncNativeReminders);
+        document.removeEventListener("visibilitychange", onVisibility);
+        window.clearInterval(rollingRefresh);
+      };
+    }
     if (!userData?.schedule) return;
 
     const checkClassNotifications = () => {
@@ -126,8 +145,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const currentMins = now.getHours() * 60 + now.getMinutes();
       const diff = ((status.nextClass as any).startMinutes || 0) - currentMins;
       const nextClassName = (status.nextClass as any).course || "Class";
-      const marker15 = `${nextClassName}-15`;
-      const marker5 = `${nextClassName}-5`;
+      const nextStart = (status.nextClass as any).startMinutes || 0;
+      const dayMarker = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${nextStart}`;
+      const marker15 = `${dayMarker}-${nextClassName}-15`;
+      const marker5 = `${dayMarker}-${nextClassName}-5`;
 
       if (diff <= 15 && diff > 5 && !classNotificationsSent.current.has(marker15)) {
         sendNotification(`Next: ${nextClassName}`, `⏳ Starts in ${diff} min`, nextClassName);
@@ -225,14 +246,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         let previous: any = {};
         try { previous = JSON.parse(localStorage.getItem("ratio_data") || "{}"); } catch {}
-        const profileReady = data.profile && [
-          data.profile.dept,
-          data.profile.program,
-          data.profile.section,
-          data.profile.semester,
-          data.profile.batch,
-          data.profile.mobile,
-        ].some(Boolean);
+        const parsedName = String(data.profile?.name || "").trim();
+        const profileReady = data.profile && data.profileParsed === true &&
+          parsedName.length > 0 && !["n/a", "unknown"].includes(parsedName.toLowerCase());
         const merged: any = {
           ...previous,
           ...data,
@@ -243,6 +259,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           courses: Object.keys(data.courses || {}).length ? data.courses : previous.courses || {},
           isPortal: Boolean(previous.isPortal),
         };
+        delete merged.profileParsed;
         merged.timetable = merged.schedule;
         EncryptionUtils.setSessionCookie();
         setUserData(merged);
