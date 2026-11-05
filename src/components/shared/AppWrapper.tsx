@@ -9,6 +9,9 @@ import SyncStatusNotification from "./SyncStatusNotification";
 import UpdateHistory from "./UpdateHistory";
 import PortalLoginModal from "./PortalLoginModal";
 import NativeUpdateModal from "./NativeUpdateModal";
+import NativeBackSync from "./NativeBackSync";
+import IsraelParticles from "./IsraelParticles";
+import IsraelWelcome from "./IsraelWelcome";
 import AnnouncementToast from "./AnnouncementToast";
 import { useTabFocus } from "@/hooks/useTabFocus";
 
@@ -349,6 +352,9 @@ export default function AppWrapper({ children }: { children: React.ReactNode }) 
 
       <MinecraftParticles />
       <MinecraftAmbience />
+      <IsraelParticles />
+      <IsraelWelcome />
+      <NativeBackSync />
       <SyncStatusNotification />
       <AnnouncementToast />
       <UpdateHistory isOpen={isUpdateHistoryOpen} onClose={() => setIsUpdateHistoryOpen(false)} />

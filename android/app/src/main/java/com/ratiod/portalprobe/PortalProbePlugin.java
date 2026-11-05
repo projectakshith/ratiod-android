@@ -70,6 +70,21 @@ public class PortalProbePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Called by the web app on every route change so the Android shell can
+     * drive the predictive back gesture (any page -> /dashboard, and the
+     * system back-to-home animation on /dashboard itself). Also carries the
+     * resolved --theme-bg color so the gesture backdrop matches the theme.
+     */
+    @PluginMethod
+    public void setRoute(PluginCall call) {
+        String path = call.getString("path", "/");
+        String bg = call.getString("bg", null);
+        MainActivity.notifyRouteChanged(path, bg);
+        call.resolve();
+    }
+
+
     @PluginMethod
     public void nativeInvoke(PluginCall call) {
         JSObject req = call.getObject("request");
